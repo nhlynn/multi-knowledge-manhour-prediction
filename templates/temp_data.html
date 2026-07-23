@@ -1,0 +1,464 @@
+{% extends "base.html" %}
+{% block title %}Temporary Data{% endblock %}
+
+{% block extra_css %}
+<style>
+    .preview-page-title {
+        font-size: 1.25rem; font-weight: 700; color: #0f172a;
+        letter-spacing: -0.025em; margin: 0; line-height: 1.3;
+    }
+    .preview-page-sub { font-size: 0.8rem; color: #64748b; margin-top: 4px; margin-bottom: 0; }
+
+    .preview-section-card {
+        border-radius: 14px !important; overflow: hidden;
+        border: 1px solid #e2e8f0 !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 28px rgba(0,0,0,0.05) !important;
+    }
+    .preview-section-card > .card-header {
+        background: #ffffff !important;
+        border-bottom: 1px solid #f1f5f9 !important;
+        padding: 0.875rem 1.375rem !important;
+    }
+    .preview-section-card > .card-header h5 { font-size: 0.9rem; font-weight: 600; color: #0f172a; letter-spacing: -0.01em; }
+    .preview-section-card > .card-body { padding: 0 !important; }
+
+    .empty-icon {
+        width: 64px; height: 64px; border-radius: 16px;
+        background: #f1f5f9; display: inline-flex;
+        align-items: center; justify-content: center;
+        font-size: 1.75rem; color: #94a3b8;
+    }
+
+    .temp-filter-card {
+        border-radius: 14px !important;
+        border: 1px solid #e2e8f0 !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 28px rgba(0,0,0,0.05) !important;
+    }
+    .temp-filter-card .card-body { padding: 1rem 1.25rem !important; }
+    .temp-filter-actions .btn { min-height: 31px; white-space: nowrap; }
+    @media (max-width: 991.98px) {
+        .temp-filter-actions { justify-content: stretch; }
+    }
+
+    .temp-actions {
+        display: flex; justify-content: flex-end; gap: 6px; white-space: nowrap;
+    }
+
+    .date-picker-wrap { position: relative; }
+    .date-picker-input { cursor: pointer; background: #fff; padding-right: 2rem; }
+    .date-picker-icon {
+        position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%);
+        color: var(--text-tertiary, #94a3b8); pointer-events: none; font-size: 0.85rem;
+    }
+    .date-picker-calendar {
+        position: absolute; top: calc(100% + 4px); left: 0; z-index: 1050;
+        background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.08); padding: 0.75rem; width: 240px; display: none;
+    }
+    .date-picker-calendar.show { display: block; }
+    .date-picker-cal-header {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 0.5rem; font-weight: 600; font-size: 0.8125rem;
+    }
+    .date-picker-cal-nav { border: none; background: none; cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 6px; }
+    .date-picker-cal-nav:hover { background: #f1f5f9; }
+    .date-picker-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; font-size: 0.75rem; }
+    .date-picker-cal-grid .dow { color: #94a3b8; font-weight: 600; padding: 4px 0; }
+    .date-picker-cal-grid button { border: none; background: none; padding: 6px 0; border-radius: 6px; cursor: pointer; font-size: 0.75rem; }
+    .date-picker-cal-grid button:hover:not(:disabled) { background: #f1f5f9; }
+    .date-picker-cal-grid button.selected { background: var(--accent, #6366f1); color: #fff; }
+    .date-picker-cal-grid button.today:not(.selected) { border: 1px solid var(--accent, #6366f1); }
+    .date-picker-cal-grid button.other-month { color: #cbd5e1; cursor: default; }
+
+    .temp-pagination {
+        display: flex; align-items: center; justify-content: space-between;
+        flex-wrap: wrap; gap: 0.75rem;
+        padding: 0.875rem 1.375rem; border-top: 1px solid #f1f5f9;
+    }
+    .temp-pagination-range { font-size: 0.8125rem; color: #64748b; white-space: nowrap; }
+    .temp-pagination-pages { display: flex; align-items: center; gap: 4px; margin: 0; list-style: none; padding: 0; }
+    .temp-page-link {
+        min-width: 30px; height: 30px; padding: 0 8px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border-radius: 8px; border: 1px solid #e2e8f0; background: #fff;
+        color: #475569; font-size: 0.8125rem; font-weight: 500; text-decoration: none;
+        transition: all 140ms ease; cursor: pointer;
+    }
+    .temp-page-link:hover { background: #f1f5f9; color: #0f172a; }
+    .temp-page-link.active {
+        background: var(--accent, #6366f1); border-color: var(--accent, #6366f1); color: #fff;
+    }
+    .temp-page-link.disabled {
+        pointer-events: none; opacity: 0.45; background: #fff;
+    }
+    .temp-page-ellipsis {
+        min-width: 30px; height: 30px; display: inline-flex;
+        align-items: center; justify-content: center; color: #94a3b8; font-size: 0.8125rem;
+    }
+    @media (max-width: 575.98px) {
+        .temp-pagination { justify-content: center; text-align: center; }
+        .temp-pagination-range { width: 100%; text-align: center; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row align-items-end mb-4 g-3">
+    <div class="col">
+        <h2 class="preview-page-title"><i class="bi bi-archive me-2 text-muted" style="font-size:1rem;"></i>Temporary Data</h2>
+        <p class="preview-page-sub">
+            Your unfinished estimates are temporarily saved here. You can restore them to continue editing.
+        </p>
+    </div>
+</div>
+
+<!-- Filters (hidden while empty) -->
+<div id="filterRow" class="row mb-3" style="display:none;">
+    <div class="col">
+        <div class="card temp-filter-card">
+            <div class="card-body">
+                <form id="tempFilterForm" class="row gy-3 gx-3 align-items-end">
+                    <div class="col-12 col-sm-6 col-lg-3">
+                        <label class="form-label" for="filterFromDate">From Date</label>
+                        <div class="date-picker-wrap">
+                            <input type="text" id="filterFromDate" class="form-control form-control-sm date-picker-input" placeholder="yyyy-mm-dd" autocomplete="off" readonly>
+                            <i class="bi bi-calendar3 date-picker-icon"></i>
+                        </div>
+                    </div>
+                    <div class="col-12 col-sm-6 col-lg-3">
+                        <label class="form-label" for="filterToDate">To Date</label>
+                        <div class="date-picker-wrap">
+                            <input type="text" id="filterToDate" class="form-control form-control-sm date-picker-input" placeholder="yyyy-mm-dd" autocomplete="off" readonly>
+                            <i class="bi bi-calendar3 date-picker-icon"></i>
+                        </div>
+                    </div>
+                    <div class="col-12 col-lg-3">
+                        <label class="form-label" for="filterProjectName">Project Name</label>
+                        <input type="text" id="filterProjectName" class="form-control form-control-sm" placeholder="Search project name...">
+                    </div>
+                    <div class="col-12 col-lg-2">
+                        <div class="temp-filter-actions d-flex gap-2">
+                            <button type="submit" class="btn btn-sm btn-primary flex-fill">
+                                <i class="bi bi-search me-1"></i>Search
+                            </button>
+                            <button type="button" id="filterResetBtn" class="btn btn-sm btn-outline-secondary flex-fill">
+                                <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Empty state -->
+<div id="emptyState" class="text-center text-muted py-5" style="display:none;">
+    <div class="empty-icon mx-auto mb-3"><i class="bi bi-inbox"></i></div>
+    <p class="mb-1 fw-medium" style="color:#475569;">No temporary data stashed.</p>
+    <p class="mb-0" style="font-size:0.85rem;">This fills up when you have Preview data and start a new session from the <a href="/">AI Chatbot</a> nav link.</p>
+</div>
+
+<!-- Master list table -->
+<div id="listCard" class="row" style="display:none;">
+    <div class="col">
+        <div class="card preview-section-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">All Stashes</h5>
+                <span class="badge bg-primary" id="tempCountBadge">0 record(s)</span>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover align-middle mb-0" id="tempTable">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Project Name</th>
+                                <th>Created By</th>
+                                <th>Created Date</th>
+                                <th class="text-end">Total Man Hour</th>
+                                <th>Status</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tempTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="temp-pagination" id="tempPagination" style="display:none;">
+                <div class="temp-pagination-range" id="tempPaginationRange"></div>
+                <ul class="temp-pagination-pages" id="tempPaginationPages"></ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    var STASHES_PAGE_API = '/preview/temp/stashes/page';
+
+    attachDatePicker(document.getElementById('filterFromDate'));
+    attachDatePicker(document.getElementById('filterToDate'));
+
+    // Default From/To Date to today on page open, so the list opens scoped
+    // to "today's stashes" instead of loading the entire history. The
+    // fields stay editable — searching another period just re-fetches
+    // with the new dates, same as the Reset button clearing them.
+    (function setDefaultDateRange() {
+        var d = new Date();
+        var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+        var today = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+        document.getElementById('filterFromDate').value = today;
+        document.getElementById('filterToDate').value = today;
+    })();
+
+    fetchPage(1);
+
+    function attachDatePicker(input) {
+        var wrap = input.closest('.date-picker-wrap');
+        var calendar = document.createElement('div');
+        calendar.className = 'date-picker-calendar';
+        wrap.appendChild(calendar);
+        var viewDate = new Date();
+        var selectedDate = null;
+
+        function pad(n) { return n < 10 ? '0' + n : '' + n; }
+        function formatISO(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+        function parseISO(s) {
+            if (!s) return null;
+            var parts = s.split('-');
+            if (parts.length !== 3) return null;
+            var d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        function render() {
+            var year = viewDate.getFullYear();
+            var month = viewDate.getMonth();
+            var monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            var firstDay = new Date(year, month, 1);
+            var startWeekday = firstDay.getDay();
+            var daysInMonth = new Date(year, month + 1, 0).getDate();
+            var daysInPrevMonth = new Date(year, month, 0).getDate();
+            var today = new Date();
+
+            var html = '<div class="date-picker-cal-header">' +
+                '<button type="button" class="date-picker-cal-nav" data-nav="-1"><i class="bi bi-chevron-left"></i></button>' +
+                '<span>' + monthNames[month] + ' ' + year + '</span>' +
+                '<button type="button" class="date-picker-cal-nav" data-nav="1"><i class="bi bi-chevron-right"></i></button>' +
+                '</div><div class="date-picker-cal-grid">';
+            ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].forEach(function(d) { html += '<div class="dow">' + d + '</div>'; });
+
+            for (var i = 0; i < startWeekday; i++) {
+                var dnum = daysInPrevMonth - startWeekday + 1 + i;
+                html += '<button type="button" class="other-month" disabled>' + dnum + '</button>';
+            }
+            for (var day = 1; day <= daysInMonth; day++) {
+                var cellDate = new Date(year, month, day);
+                var isToday = cellDate.toDateString() === today.toDateString();
+                var isSelected = selectedDate && cellDate.toDateString() === selectedDate.toDateString();
+                var cls = (isToday ? 'today ' : '') + (isSelected ? 'selected' : '');
+                html += '<button type="button" class="' + cls + '" data-day="' + day + '">' + day + '</button>';
+            }
+            var totalCells = startWeekday + daysInMonth;
+            var trailing = (7 - (totalCells % 7)) % 7;
+            for (var j = 1; j <= trailing; j++) {
+                html += '<button type="button" class="other-month" disabled>' + j + '</button>';
+            }
+            html += '</div>';
+            calendar.innerHTML = html;
+
+            Array.prototype.forEach.call(calendar.querySelectorAll('.date-picker-cal-nav'), function(btn) {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    viewDate.setMonth(viewDate.getMonth() + parseInt(btn.getAttribute('data-nav'), 10));
+                    render();
+                });
+            });
+            Array.prototype.forEach.call(calendar.querySelectorAll('.date-picker-cal-grid button[data-day]'), function(btn) {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    var day = parseInt(btn.getAttribute('data-day'), 10);
+                    selectedDate = new Date(viewDate.getFullYear(), viewDate.getMonth(), day);
+                    input.value = formatISO(selectedDate);
+                    calendar.classList.remove('show');
+                    applyFilters();
+                });
+            });
+        }
+
+        input.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var existing = parseISO(input.value);
+            if (existing) {
+                selectedDate = existing;
+                viewDate = new Date(existing.getFullYear(), existing.getMonth(), 1);
+            }
+            render();
+            calendar.classList.toggle('show');
+        });
+
+        document.addEventListener('click', function(e) {
+            if (!wrap.contains(e.target)) calendar.classList.remove('show');
+        });
+    }
+
+    function currentFilters() {
+        return {
+            fromDate: document.getElementById('filterFromDate').value,
+            toDate: document.getElementById('filterToDate').value,
+            projectQuery: document.getElementById('filterProjectName').value.trim(),
+        };
+    }
+
+    function fetchPage(page) {
+        var filters = currentFilters();
+
+        var params = new URLSearchParams();
+        params.set('page', page);
+        if (filters.fromDate) params.set('from_date', filters.fromDate);
+        if (filters.toDate) params.set('to_date', filters.toDate);
+        if (filters.projectQuery) params.set('project_name', filters.projectQuery);
+
+        window.MHES.showLoading('Loading...');
+        fetch(STASHES_PAGE_API + '?' + params.toString())
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                document.getElementById('filterRow').style.display = '';
+                document.getElementById('listCard').style.display = '';
+                document.getElementById('emptyState').style.display = 'none';
+
+                renderTable(data.items, data.total);
+                renderPagination(data.page, data.total_pages, data.total, data.per_page);
+            })
+            .catch(function() { showEmpty(); })
+            .finally(function() { window.MHES.hideLoading(); });
+    }
+
+    function showEmpty() {
+        document.getElementById('filterRow').style.display = 'none';
+        document.getElementById('listCard').style.display = 'none';
+        document.getElementById('emptyState').style.display = '';
+    }
+
+    function calcTotalHours(stash) {
+        if (stash.totals && typeof stash.totals.final === 'number') return stash.totals.final;
+        var total = 0;
+        (stash.categories || []).forEach(function(cat) {
+            (cat.tasks || []).forEach(function(t) { total += t.total_hours || 0; });
+        });
+        return total;
+    }
+
+    function renderTable(rows, total) {
+        var tbody = document.getElementById('tempTableBody');
+        var countBadge = document.getElementById('tempCountBadge');
+        countBadge.textContent = total + ' record(s)';
+
+        if (rows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">' +
+                'No stashes match the selected filters. Try adjusting the date range or project name, or ' +
+                '<a href="#" id="tempFilterResetLink">reset the filters</a>.</td></tr>';
+            var resetLink = document.getElementById('tempFilterResetLink');
+            if (resetLink) {
+                resetLink.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    document.getElementById('filterResetBtn').click();
+                });
+            }
+            return;
+        }
+
+        var html = '';
+        rows.forEach(function(stash) {
+            html +=
+                '<tr>' +
+                    '<td>' + esc(stash.projectName || 'Untitled stash') + '</td>' +
+                    '<td>' + esc(stash.createdBy || '-') + '</td>' +
+                    '<td><small class="text-muted">' + esc(formatStashedAt(stash.stashedAt)) + '</small></td>' +
+                    '<td class="text-end">' + calcTotalHours(stash) + 'h</td>' +
+                    '<td><span class="badge bg-warning text-dark">Pending</span></td>' +
+                    '<td class="text-end">' +
+                        '<div class="temp-actions">' +
+                            '<a href="/preview/temp/' + encodeURIComponent(stash.id) + '" class="btn btn-sm btn-outline-primary" title="View estimate detail">' +
+                                '<i class="bi bi-eye me-1"></i>View' +
+                            '</a>' +
+                        '</div>' +
+                    '</td>' +
+                '</tr>';
+        });
+        tbody.innerHTML = html;
+    }
+
+    function renderPagination(page, totalPages, total, perPage) {
+        var pagination = document.getElementById('tempPagination');
+        var rangeEl = document.getElementById('tempPaginationRange');
+        var pagesEl = document.getElementById('tempPaginationPages');
+
+        if (!total) {
+            pagination.style.display = 'none';
+            return;
+        }
+        pagination.style.display = '';
+
+        var rangeStart = (page - 1) * perPage + 1;
+        var rangeEnd = Math.min(page * perPage, total);
+        rangeEl.textContent = 'Showing ' + rangeStart + '–' + rangeEnd + ' of ' + total + ' record' + (total !== 1 ? 's' : '');
+
+        if (totalPages <= 1) {
+            pagesEl.innerHTML = '';
+            return;
+        }
+
+        function pageLink(label, targetPage, extraClass) {
+            var classes = 'temp-page-link' + (extraClass ? ' ' + extraClass : '');
+            return '<li><a class="' + classes + '" data-page="' + targetPage + '">' + label + '</a></li>';
+        }
+
+        var html = pageLink('<i class="bi bi-chevron-left"></i>', page - 1, page <= 1 ? 'disabled' : '');
+        for (var p = 1; p <= totalPages; p++) {
+            if (p === 1 || p === totalPages || (p >= page - 1 && p <= page + 1)) {
+                html += pageLink(String(p), p, p === page ? 'active' : '');
+            } else if (p === page - 2 || p === page + 2) {
+                html += '<li><span class="temp-page-ellipsis">&hellip;</span></li>';
+            }
+        }
+        html += pageLink('<i class="bi bi-chevron-right"></i>', page + 1, page >= totalPages ? 'disabled' : '');
+
+        pagesEl.innerHTML = html;
+        Array.prototype.forEach.call(pagesEl.querySelectorAll('.temp-page-link:not(.disabled)'), function(link) {
+            link.addEventListener('click', function() {
+                fetchPage(parseInt(link.getAttribute('data-page'), 10));
+            });
+        });
+    }
+
+    document.getElementById('tempFilterForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        fetchPage(1);
+    });
+
+    document.getElementById('filterResetBtn').addEventListener('click', function() {
+        document.getElementById('filterFromDate').value = '';
+        document.getElementById('filterToDate').value = '';
+        document.getElementById('filterProjectName').value = '';
+        fetchPage(1);
+    });
+
+    function formatStashedAt(isoString) {
+        if (!isoString) return '';
+        var d = new Date(isoString);
+        if (isNaN(d.getTime())) return isoString;
+        var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    }
+
+    function esc(str) {
+        var div = document.createElement('div');
+        div.textContent = str || '';
+        return div.innerHTML;
+    }
+})();
+</script>
+{% endblock %}

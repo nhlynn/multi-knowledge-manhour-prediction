@@ -1,0 +1,734 @@
+{% extends "base.html" %}
+{% block title %}Chatbot{% endblock %}
+{% block main_class %}flex-grow-1 d-flex flex-column p-0 overflow-hidden{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* ── Layout containment ── */
+    .app-main { overflow: hidden; }
+    .app-main > div { height: 100%; }
+
+    /* ── Chat shell ── */
+    .chat-wrapper {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        overflow: hidden;
+        background: #f1f5f9;
+    }
+
+    /* ── Header ── */
+    .chat-header {
+        flex-shrink: 0;
+        padding: 0.625rem 1.25rem;
+        border-bottom: 1px solid #e2e8f0;
+        background: #ffffff;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+        min-height: 0;
+        z-index: 1;
+    }
+    .chat-header h5 {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #0f172a;
+        letter-spacing: -0.01em;
+    }
+    .chat-header .badge {
+        font-size: 0.65rem;
+        font-weight: 500;
+        background: #e2e8f0 !important;
+        color: #475569 !important;
+        border-radius: 20px;
+        padding: 0.3em 0.75em;
+        letter-spacing: 0.3px;
+    }
+
+    /* ── Messages area ── */
+    #chatMessages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 1.5rem 1.25rem;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    /* ── Animations ── */
+    @keyframes msgFadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Message rows ── */
+    /* Remove Bootstrap mb-3 gap (we use gap above) and bottom-align avatars */
+    #chatMessages > .d-flex {
+        margin-bottom: 0 !important;
+        align-items: flex-end;
+        animation: msgFadeIn 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    /* ── Avatars ── */
+    /* Both bot (.bg-primary) and user (.bg-secondary) avatar badges */
+    .badge.rounded-circle {
+        width: 32px !important;
+        height: 32px !important;
+        min-width: 32px !important;
+        border-radius: 50% !important;
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.78rem;
+        padding: 0 !important;
+        flex-shrink: 0;
+    }
+    /* Bot avatar — indigo-violet gradient */
+    .me-2 .badge.bg-primary {
+        background: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%) !important;
+        box-shadow: 0 2px 6px rgba(99,102,241,0.35);
+    }
+    /* User avatar — slate */
+    .ms-2 .badge.bg-secondary {
+        background: #475569 !important;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    }
+
+    /* ── Bot bubble ── */
+    .msg-bot { max-width: 82%; }
+    .msg-bot > div {
+        background: #ffffff !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 4px 16px 16px 16px !important;
+        padding: 0.75rem 1rem !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04) !important;
+        font-size: 0.845rem;
+        line-height: 1.65;
+        color: #1e293b;
+        transition: transform 180ms ease, box-shadow 180ms ease;
+    }
+    .msg-bot > div:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 14px rgba(0,0,0,0.09), 0 2px 6px rgba(0,0,0,0.05) !important;
+    }
+
+    /* ── User bubble ── */
+    .msg-user { max-width: 70%; }
+    .msg-user > div {
+        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
+        border: none !important;
+        border-radius: 16px 4px 16px 16px !important;
+        padding: 0.7rem 1rem !important;
+        box-shadow: 0 2px 10px rgba(99,102,241,0.35), 0 1px 3px rgba(99,102,241,0.2) !important;
+        font-size: 0.845rem;
+        line-height: 1.55;
+        color: #ffffff !important;
+        transition: transform 180ms ease, box-shadow 180ms ease;
+    }
+    .msg-user > div:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 16px rgba(99,102,241,0.45), 0 2px 6px rgba(99,102,241,0.25) !important;
+    }
+
+    /* ── Estimation result table ── */
+
+    /* Scrollable container with capped height for sticky to work */
+    .msg-bot .table-responsive {
+        margin-top: 0.75rem;
+        border-radius: 10px;
+        border: 1px solid #dde3ec;
+        overflow: auto;
+        max-height: 460px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+
+    .msg-bot .table {
+        font-size: 0.775rem;
+        margin: 0;
+        min-width: 820px;           /* prevent column crush on narrow bubbles */
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    /* Sticky header */
+    .msg-bot .table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        background: #1e293b;        /* solid so it covers rows on scroll */
+        color: #e2e8f0;
+        font-size: 0.685rem;
+        font-weight: 600;
+        letter-spacing: 0.45px;
+        text-transform: uppercase;
+        padding: 0.6rem 0.75rem;
+        white-space: nowrap;
+        border-bottom: 2px solid #334155;
+        border-right: 1px solid #334155;
+    }
+    .msg-bot .table thead th:last-child { border-right: none; }
+
+    /* Zebra rows — targets td so it works with rowspan cells */
+    .msg-bot .table tbody tr:nth-child(even) td { background: #f8fafc; }
+    .msg-bot .table tbody tr:nth-child(odd)  td { background: #ffffff; }
+    .msg-bot .table tbody tr:hover td { background: #eef2ff; transition: background 80ms; }
+
+    /* Cell spacing & borders */
+    .msg-bot .table tbody td {
+        padding: 0.5rem 0.75rem;
+        vertical-align: middle;
+        border-color: #e8edf4;
+    }
+    .msg-bot .table tbody td:first-child { border-left: none; }
+    .msg-bot .table tbody td:last-child  { border-right: none; }
+    .msg-bot .table tbody tr:last-child td { border-bottom: none; }
+
+    /* Highlighted totals row */
+    .msg-bot .table tfoot td {
+        background: #0f172a !important;
+        color: #f1f5f9;
+        font-weight: 700;
+        font-size: 0.775rem;
+        padding: 0.6rem 0.75rem;
+        border-color: #1e293b;
+        letter-spacing: 0.1px;
+        position: sticky;
+        bottom: 0;
+        z-index: 3;
+    }
+    /* Accent left border on numeric total cells */
+    .msg-bot .table tfoot td.text-end {
+        color: #a5f3fc;
+    }
+
+    /* Spinner color inside bot bubble */
+    .msg-bot .spinner-border { color: #6366f1; }
+
+    /* ── Bottom bar ── */
+    .chat-bottom {
+        flex-shrink: 0;
+        border-top: 1px solid #e2e8f0;
+        background: #ffffff;
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+    }
+
+    /* Selection bar */
+    #selectionBar {
+        padding: 0.5rem 1.25rem !important;
+        border-bottom: 1px solid #f1f5f9 !important;
+        background: #fafbff;
+    }
+    #selectionBar .form-check-label {
+        font-size: 0.8rem;
+        font-weight: 500;
+    }
+    #goPreviewBtn {
+        font-size: 0.78rem;
+        border-radius: 20px;
+        padding: 0.35rem 0.9rem;
+    }
+
+    /* Input row */
+    .chat-bottom > div:last-child { padding: 0.875rem 1.25rem; }
+    #chatInput {
+        border-radius: 24px 0 0 24px !important;
+        border: 1.5px solid #e2e8f0;
+        border-right: none;
+        padding: 0.6rem 1.1rem;
+        font-size: 0.85rem;
+        background: #f8fafc;
+        color: #0f172a;
+        transition: border-color 150ms, box-shadow 150ms, background 150ms;
+    }
+    #chatInput:focus {
+        border-color: #6366f1;
+        background: #fff;
+        box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
+        outline: none;
+    }
+    #chatInput::placeholder { color: #94a3b8; }
+    #sendBtn {
+        border-radius: 0 24px 24px 0 !important;
+        padding: 0.6rem 1.1rem;
+        font-size: 0.875rem;
+        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+        border: none;
+        box-shadow: 0 2px 8px rgba(99,102,241,0.3);
+        transition: box-shadow 140ms, opacity 140ms;
+    }
+    #sendBtn:hover:not(:disabled) {
+        box-shadow: 0 4px 14px rgba(99,102,241,0.4);
+        opacity: 0.92;
+    }
+    #sendBtn:disabled { opacity: 0.55; box-shadow: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="chat-wrapper">
+    <!-- Header -->
+    <div class="chat-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-chat-dots me-2"></i>AI Chatbot</h5>
+        <span class="badge bg-secondary">Semantic Search (FAISS)</span>
+    </div>
+
+    <!-- Scrollable messages area -->
+    <div id="chatMessages">
+        <!-- Welcome message -->
+        <div class="d-flex mb-3">
+            <div class="me-2"><span class="badge bg-primary rounded-circle p-2"><i class="bi bi-robot"></i></span></div>
+            <div class="msg-bot">
+                <div class="bg-light rounded-3 p-3">
+                    <p class="mb-1">Hello! I can help you find man-hour estimations from the knowledge base.</p>
+                    <p class="mb-0 text-muted">Try asking something like <em>"How many hours for server setup?"</em> or <em>"Tell me about database creation"</em>.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom bar: selection + input (always pinned at bottom) -->
+    <div class="chat-bottom">
+        <div class="justify-content-between align-items-center d-none p-2 border-bottom" id="selectionBar">
+            <div class="form-check mb-0">
+                <input class="form-check-input" type="checkbox" id="noneCheckbox">
+                <label class="form-check-label text-danger" for="noneCheckbox">None of the above</label>
+            </div>
+            <button class="btn btn-success btn-sm" id="goPreviewBtn">
+                <i class="bi bi-table me-1"></i>Go to Preview (<span id="selectedCount">0</span> selected)
+            </button>
+        </div>
+        <div class="p-3">
+            <div class="input-group">
+                <input type="text" class="form-control" placeholder="Ask a question..." id="chatInput">
+                <button class="btn btn-primary" type="button" id="sendBtn">
+                    <i class="bi bi-send"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    var chatInput = document.getElementById('chatInput');
+    var sendBtn = document.getElementById('sendBtn');
+    var chatMessages = document.getElementById('chatMessages');
+
+    // Store categories per result set (keyed by resultId)
+    var resultStore = {};
+
+    // Conversation is persisted so "Add More / Back to Chatbot" (Preview)
+    // resumes the same thread. The sidebar's "AI Chatbot" nav link clears
+    // these keys before navigating, so that path always starts fresh.
+    var CHAT_HISTORY_KEY = 'mhes_chat_history';
+    var CHAT_RESULT_STORE_KEY = 'mhes_chat_result_store';
+
+    function saveChatHistory() {
+        sessionStorage.setItem(CHAT_HISTORY_KEY, chatMessages.innerHTML);
+        sessionStorage.setItem(CHAT_RESULT_STORE_KEY, JSON.stringify(resultStore));
+    }
+
+    function scrollToBottom() {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function addUserMessage(text) {
+        var html =
+            '<div class="d-flex justify-content-end mb-3">' +
+                '<div class="msg-user">' +
+                    '<div class="bg-primary text-white rounded-3 p-3">' + escHtml(text) + '</div>' +
+                '</div>' +
+                '<div class="ms-2"><span class="badge bg-secondary rounded-circle p-2"><i class="bi bi-person"></i></span></div>' +
+            '</div>';
+        chatMessages.insertAdjacentHTML('beforeend', html);
+        scrollToBottom();
+        saveChatHistory();
+    }
+
+    function addBotLoading() {
+        var id = 'loading-' + Date.now();
+        var html =
+            '<div class="d-flex mb-3" id="' + id + '">' +
+                '<div class="me-2"><span class="badge bg-primary rounded-circle p-2"><i class="bi bi-robot"></i></span></div>' +
+                '<div class="msg-bot">' +
+                    '<div class="bg-light rounded-3 p-3">' +
+                        '<span class="spinner-border spinner-border-sm me-2" role="status"></span>' +
+                        '<span class="text-muted">Searching knowledge base...</span>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+        chatMessages.insertAdjacentHTML('beforeend', html);
+        scrollToBottom();
+        return id;
+    }
+
+    function replaceBotMessage(loadingId, contentHtml) {
+        var el = document.getElementById(loadingId);
+        if (!el) return;
+        el.outerHTML =
+            '<div class="d-flex mb-3">' +
+                '<div class="me-2"><span class="badge bg-primary rounded-circle p-2"><i class="bi bi-robot"></i></span></div>' +
+                '<div class="msg-bot">' +
+                    '<div class="bg-light rounded-3 p-3">' + contentHtml + '</div>' +
+                '</div>' +
+            '</div>';
+        scrollToBottom();
+        saveChatHistory();
+    }
+
+    function buildResponseHtml(query, categories, totals) {
+        // Generate a unique id for this result set and store categories
+        var resultId = 'r' + Date.now();
+        resultStore[resultId] = categories;
+
+        // Summary text
+        var taskCount = 0;
+        var actCount = 0;
+        var sources = [];
+        categories.forEach(function(cat) {
+            cat.tasks.forEach(function(t) {
+                taskCount++;
+                actCount += t.activities.length;
+            });
+            if (cat.source && sources.indexOf(cat.source) === -1) sources.push(cat.source);
+        });
+
+        var summary = '<p class="mb-2">I found <strong>' + taskCount + ' task(s)</strong> with <strong>' +
+            actCount + ' activit' + (actCount === 1 ? 'y' : 'ies') + '</strong> matching your query. ' +
+            'The total estimate is <strong>' + totals.final + ' hours</strong> ' +
+            '(' + totals.estimate + 'h estimate + ' + totals.buffer + 'h buffer).</p>';
+
+        // Build table with checkbox column
+        var table = '<div class="table-responsive mt-2"><table class="table table-bordered align-middle mb-0">' +
+            '<thead class="table-dark"><tr>' +
+                '<th style="width:30px;"></th>' +
+                '<th class="text-center">Category</th>' +
+                '<th class="text-center">Task List</th>' +
+                '<th class="text-center">Activity Details</th>' +
+                '<th class="text-center">Activity Details Estimate (Hours)</th>' +
+                '<th class="text-center">Estimate (Hours)</th>' +
+                '<th class="text-center">Buffer (Hours)</th>' +
+                '<th class="text-center">Task Estimate (Hours)</th>' +
+                '<th>Resource</th>' +
+            '</tr></thead><tbody>';
+
+        categories.forEach(function(cat, catIdx) {
+            var catRowCount = 0;
+            cat.tasks.forEach(function(t) { catRowCount += t.activities.length; });
+            var firstCatRow = true;
+
+            cat.tasks.forEach(function(task) {
+                var actLen = task.activities.length;
+                var firstTaskRow = true;
+
+                task.activities.forEach(function(act) {
+                    table += '<tr>';
+
+                    if (firstCatRow) {
+                        table += '<td class="align-middle text-center" rowspan="' + catRowCount + '">' +
+                            '<input class="form-check-input cat-cb" type="checkbox" data-result="' + resultId + '" data-cat="' + catIdx + '">' +
+                            '</td>';
+                        table += '<td class="fw-bold align-middle" rowspan="' + catRowCount + '">' + escHtml(cat.category) + '</td>';
+                    }
+                    if (firstTaskRow) {
+                        table += '<td class="align-middle" rowspan="' + actLen + '">' + escHtml(task.task) + '</td>';
+                    }
+
+                    table += '<td>' + escHtml(act.task_detail) + '</td>';
+                    table += '<td class="text-end">' + act.estimate_hours + '</td>';
+
+                    if (firstTaskRow) {
+                        table += '<td class="text-end align-middle" rowspan="' + actLen + '">' + task.estimate_hours + '</td>';
+                        table += '<td class="text-end align-middle" rowspan="' + actLen + '">' + task.buffer_hours + '</td>';
+                        table += '<td class="text-end align-middle fw-bold" rowspan="' + actLen + '">' + task.total_hours + '</td>';
+                        firstTaskRow = false;
+                    }
+
+                    if (firstCatRow) {
+                        table += '<td class="align-middle text-muted" rowspan="' + catRowCount + '"><small>' + escHtml(cat.source || '') + '</small></td>';
+                        firstCatRow = false;
+                    }
+
+                    table += '</tr>';
+                });
+            });
+        });
+
+        table += '</tbody><tfoot class="table-dark"><tr>' +
+            '<td></td>' +
+            '<td colspan="3" class="fw-bold">Total</td>' +
+            '<td class="text-end fw-bold">' + totals.task_estimate + '</td>' +
+            '<td class="text-end fw-bold">' + totals.estimate + '</td>' +
+            '<td class="text-end fw-bold">' + totals.buffer + '</td>' +
+            '<td class="text-end fw-bold">' + totals.final + '</td>' +
+            '<td></td>' +
+            '</tr></tfoot></table></div>';
+
+        return summary + table;
+    }
+
+    var selectionBar = document.getElementById('selectionBar');
+    var goPreviewBtn = document.getElementById('goPreviewBtn');
+    var selectedCount = document.getElementById('selectedCount');
+    var noneCheckbox = document.getElementById('noneCheckbox');
+    var hasResults = false;
+
+    function updateSelectionBar() {
+        // Only show if there are results with checkboxes in the chat
+        var totalCheckboxes = document.querySelectorAll('.cat-cb').length;
+        if (totalCheckboxes === 0) {
+            selectionBar.classList.add('d-none');
+            selectionBar.classList.remove('d-flex');
+            return;
+        }
+        var count = document.querySelectorAll('.cat-cb:checked').length;
+        selectedCount.textContent = count;
+        selectionBar.classList.remove('d-none');
+        selectionBar.classList.add('d-flex');
+        goPreviewBtn.disabled = !noneCheckbox.checked && count === 0;
+    }
+
+    // Show/hide bar when any category checkbox changes
+    chatMessages.addEventListener('change', function(e) {
+        if (e.target.classList.contains('cat-cb')) {
+            if (e.target.checked) {
+                noneCheckbox.checked = false;
+            }
+            updateSelectionBar();
+        }
+    });
+
+    // "None of the above" unchecks all category checkboxes
+    noneCheckbox.addEventListener('change', function() {
+        if (this.checked) {
+            chatMessages.querySelectorAll('.cat-cb:checked').forEach(function(cb) {
+                cb.checked = false;
+            });
+            updateSelectionBar();
+        }
+    });
+
+    // Single "Go to Preview" button click
+    goPreviewBtn.addEventListener('click', function() {
+        // "None of the above" → go to preview with no new data
+        if (noneCheckbox.checked) {
+            window.location.href = '/preview';
+            return;
+        }
+
+        var allChecked = document.querySelectorAll('.cat-cb:checked');
+        if (allChecked.length === 0) return;
+
+        var selected = [];
+
+        allChecked.forEach(function(cb) {
+            var rid = cb.getAttribute('data-result');
+            var idx = parseInt(cb.getAttribute('data-cat'), 10);
+            var cats = resultStore[rid];
+            if (cats && cats[idx]) {
+                selected.push(cats[idx]);
+            }
+        });
+
+        if (selected.length === 0) return;
+
+        // Merge with existing preview data
+        var existing = [];
+        try {
+            var prev = JSON.parse(sessionStorage.getItem('previewData') || '{}');
+            existing = prev.categories || [];
+        } catch(ex) {}
+
+        // Build lookup of existing categories by category+source
+        var existingMap = {};
+        existing.forEach(function(cat, i) {
+            var key = (cat.category || '') + '||' + (cat.source || '');
+            existingMap[key] = i;
+        });
+
+        // Merge: same category+source → merge tasks; different → add new
+        selected.forEach(function(cat) {
+            var key = (cat.category || '') + '||' + (cat.source || '');
+            if (key in existingMap) {
+                var existCat = existing[existingMap[key]];
+                var existingTaskNames = {};
+                existCat.tasks.forEach(function(t) { existingTaskNames[t.task] = true; });
+                cat.tasks.forEach(function(t) {
+                    if (!existingTaskNames[t.task]) {
+                        existCat.tasks.push(JSON.parse(JSON.stringify(t)));
+                    }
+                });
+            } else {
+                existing.push(JSON.parse(JSON.stringify(cat)));
+                existingMap[key] = existing.length - 1;
+            }
+        });
+
+        // Also merge all selected items among themselves (across different responses)
+        // Rebuild existing from scratch to deduplicate
+        var merged = [];
+        var mergedMap = {};
+        existing.forEach(function(cat) {
+            var key = (cat.category || '') + '||' + (cat.source || '');
+            if (key in mergedMap) {
+                var target = merged[mergedMap[key]];
+                var targetTaskNames = {};
+                target.tasks.forEach(function(t) { targetTaskNames[t.task] = true; });
+                cat.tasks.forEach(function(t) {
+                    if (!targetTaskNames[t.task]) {
+                        target.tasks.push(t);
+                    }
+                });
+            } else {
+                merged.push(cat);
+                mergedMap[key] = merged.length - 1;
+            }
+        });
+        existing = merged;
+
+        var totals = { task_estimate: 0, estimate: 0, buffer: 0, final: 0 };
+        existing.forEach(function(cat) {
+            cat.tasks.forEach(function(task) {
+                totals.estimate += task.estimate_hours;
+                totals.buffer += task.buffer_hours;
+                totals.final += task.total_hours;
+                task.activities.forEach(function(act) {
+                    totals.task_estimate += act.estimate_hours;
+                });
+            });
+        });
+
+        sessionStorage.setItem('previewData', JSON.stringify({
+            categories: existing,
+            totals: totals
+        }));
+        window.location.href = '/preview';
+    });
+
+    function doSearch() {
+        var query = chatInput.value.trim();
+        if (!query) return;
+
+        addUserMessage(query);
+        chatInput.value = '';
+        sendBtn.disabled = true;
+        chatInput.disabled = true;
+
+        var loadingId = addBotLoading();
+
+        fetch('{{ url_for("chatbot.search") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({query: query, top_k: 10})
+        })
+        .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+        .then(function(res) {
+            if (!res.ok) {
+                replaceBotMessage(loadingId,
+                    '<p class="text-danger mb-0"><i class="bi bi-exclamation-triangle me-2"></i>' +
+                    escHtml(res.data.error || 'Search failed.') + '</p>');
+                updateSelectionBar();
+                return;
+            }
+            var categories = res.data.categories || [];
+            if (categories.length === 0) {
+                replaceBotMessage(loadingId,
+                    '<p class="mb-0"><i class="bi bi-info-circle me-2"></i>Sorry, I couldn\'t find any matching results for your query. Try different keywords or check if knowledge files have been uploaded.</p>');
+                updateSelectionBar();
+                return;
+            }
+            var html = buildResponseHtml(query, categories, res.data.totals || {});
+            replaceBotMessage(loadingId, html);
+            hasResults = true;
+            noneCheckbox.checked = false;
+            updateSelectionBar();
+        })
+        .catch(function() {
+            replaceBotMessage(loadingId,
+                '<p class="text-danger mb-0"><i class="bi bi-exclamation-triangle me-2"></i>Failed to connect to the server. Please try again.</p>');
+        })
+        .finally(function() {
+            sendBtn.disabled = false;
+            chatInput.disabled = false;
+            chatInput.focus();
+        });
+    }
+
+    function escHtml(str) {
+        var div = document.createElement('div');
+        div.textContent = str || '';
+        return div.innerHTML;
+    }
+
+    sendBtn.addEventListener('click', doSearch);
+    chatInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') doSearch();
+    });
+
+    document.querySelectorAll('.example-query').forEach(function(el) {
+        el.addEventListener('click', function(e) {
+            e.preventDefault();
+            chatInput.value = el.textContent.trim();
+            doSearch();
+        });
+    });
+
+    // Arriving via "Add More / Back to Chatbot" (Preview) is marked with
+    // ?resume=1 — that's the ONLY path that resumes the saved conversation.
+    // Arriving any other way (sidebar nav, brand logo, typed URL, back
+    // button, bookmark, refresh) starts fresh and stashes any pending
+    // Preview data on the server so it isn't lost.
+    (function initConversationState() {
+        var params = new URLSearchParams(window.location.search);
+        var isResume = params.get('resume') === '1';
+
+        if (isResume) {
+            // Strip the marker so a later refresh/bookmark of this same
+            // URL doesn't keep resuming.
+            params.delete('resume');
+            var qs = params.toString();
+            var cleanUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+            window.history.replaceState({}, '', cleanUrl);
+
+            var savedHtml = sessionStorage.getItem(CHAT_HISTORY_KEY);
+            if (savedHtml) {
+                chatMessages.innerHTML = savedHtml;
+                try {
+                    resultStore = JSON.parse(sessionStorage.getItem(CHAT_RESULT_STORE_KEY) || '{}');
+                } catch (e) {
+                    resultStore = {};
+                }
+                hasResults = document.querySelectorAll('.cat-cb').length > 0;
+                updateSelectionBar();
+                scrollToBottom();
+            }
+            return;
+        }
+
+        sessionStorage.removeItem(CHAT_HISTORY_KEY);
+        sessionStorage.removeItem(CHAT_RESULT_STORE_KEY);
+
+        var previewRaw = sessionStorage.getItem('previewData');
+        var previewData;
+        try { previewData = JSON.parse(previewRaw || '{}'); } catch (err) { previewData = null; }
+
+        if (previewData && previewData.categories && previewData.categories.length > 0) {
+            fetch('/preview/temp/stashes', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    categories: previewData.categories,
+                    totals: previewData.totals || {},
+                    projectName: previewData.projectName || '',
+                    createdBy: previewData.createdBy || '',
+                    projectRemark: previewData.projectRemark || ''
+                })
+            })
+            .then(function() { sessionStorage.removeItem('previewData'); })
+            .catch(function() {});
+        }
+    })();
+})();
+</script>
+{% endblock %}

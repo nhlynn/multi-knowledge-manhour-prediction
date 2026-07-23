@@ -1,0 +1,1080 @@
+{% extends "base.html" %}
+{% block title %}Preview{% endblock %}
+
+{% block extra_css %}
+<link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
+<style>
+    /* ── Editable spans ── */
+    .editable {
+        cursor: text;
+        border-radius: 4px;
+        padding: 2px 5px;
+        transition: background 120ms ease;
+    }
+    .editable:hover { background-color: #fef9c3 !important; }
+    .editable:focus {
+        background-color: #fffbeb !important;
+        outline: 2px solid #6366f1;
+        outline-offset: 1px;
+    }
+
+    /* ── Delete button ── */
+    .del-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 22px; height: 22px; font-size: 13px; line-height: 1;
+        padding: 0; border: none; border-radius: 5px;
+        background: #fef2f2; color: #dc2626;
+        cursor: pointer; flex-shrink: 0; font-weight: 700;
+        opacity: 0; pointer-events: none;
+        transition: opacity 150ms ease, background 120ms ease, color 120ms ease;
+    }
+    .del-btn:hover { background: #ef4444; color: #fff; }
+    .category-header:hover .del-btn,
+    .category-header:focus-within .del-btn,
+    .task-header:hover .del-btn,
+    .task-header:focus-within .del-btn,
+    .activity-row:hover .del-btn,
+    .activity-row:focus-within .del-btn { opacity: 1; pointer-events: auto; }
+
+    /* ── Add buttons ── */
+    .add-btn.btn {
+        font-size: 0.75rem; color: #64748b;
+        border: 1.5px dashed #cbd5e1; border-radius: 8px; padding: 5px 14px;
+        transition: all 140ms ease;
+    }
+    .add-btn.btn:hover, .add-btn.btn:focus {
+        background: #f0f4ff; color: #6366f1;
+        border-color: #6366f1; border-style: dashed; box-shadow: none;
+    }
+    .cat-footer { background: #f8fafc; border-top: 1px solid #eef2f7; padding: 10px 16px; }
+    .act-footer { background: #f8fafc; border-top: 1px dashed #eef2f7; padding: 8px 16px 10px 28px; }
+
+    /* ── Page header ── */
+    .preview-page-title {
+        font-size: 1.25rem; font-weight: 700; color: #0f172a;
+        letter-spacing: -0.025em; margin: 0; line-height: 1.3;
+    }
+    .preview-page-sub { font-size: 0.8rem; color: #64748b; margin-top: 4px; margin-bottom: 0; }
+    .edit-hint { color: #6366f1; font-weight: 500; }
+
+    /* ── Summary strip ── */
+    .summary-strip {
+        display: flex; align-items: stretch; flex-wrap: nowrap;
+        background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03);
+    }
+    .ss-stat {
+        display: flex; flex-direction: row; align-items: center; gap: 10px;
+        padding: 16px 20px; flex: 1; min-width: 0;
+    }
+    .ss-label {
+        font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.7px; color: #94a3b8; white-space: nowrap; flex-shrink: 0;
+    }
+    .ss-val {
+        font-size: 1.4rem; font-weight: 700; color: #0f172a;
+        letter-spacing: -0.04em; line-height: 1;
+    }
+    .ss-unit { font-size: 0.72rem; font-weight: 600; color: #94a3b8; margin-left: -2px; align-self: flex-end; padding-bottom: 2px; }
+    .ss-sep { width: 1px; background: #f1f5f9; flex-shrink: 0; margin: 12px 0; }
+    .ss-total { background: linear-gradient(135deg, rgba(99,102,241,0.07) 0%, rgba(79,70,229,0.04) 100%); }
+    .ss-total .ss-val { color: #6366f1; font-size: 1.55rem; }
+    .ss-total .ss-label { color: #818cf8; }
+    .ss-counts {
+        padding: 0 18px; font-size: 0.68rem; color: #94a3b8; white-space: nowrap;
+        border-left: 1px solid #f1f5f9; flex-shrink: 0;
+        display: flex; align-items: center;
+    }
+
+    /* ── Outer section card ── */
+    .preview-section-card {
+        border-radius: 14px !important; overflow: hidden;
+        border: 1px solid #e2e8f0 !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 28px rgba(0,0,0,0.05) !important;
+    }
+    .preview-section-card > .card-header {
+        background: #ffffff !important;
+        border-bottom: 1px solid #f1f5f9 !important;
+        padding: 0.875rem 1.375rem !important;
+    }
+    .preview-section-card > .card-header h5 {
+        font-size: 0.9rem; font-weight: 600; color: #0f172a; letter-spacing: -0.01em;
+    }
+    .preview-section-card > .card-body {
+        background: #f0f2f5 !important;
+        padding: 1.25rem !important;
+    }
+
+    /* ── Category card ── */
+    .category-card {
+        border: 1px solid #dde3ec !important; border-radius: 12px !important;
+        overflow: hidden; background: #fff;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.05), 0 4px 14px rgba(0,0,0,0.04) !important;
+        transition: box-shadow 200ms ease, transform 200ms ease;
+    }
+    .category-card:hover {
+        box-shadow: 0 4px 16px rgba(0,0,0,0.10), 0 16px 40px rgba(0,0,0,0.07) !important;
+        transform: translateY(-1px);
+    }
+    .category-header {
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%) !important;
+        padding: 14px 16px !important;
+        min-height: 56px;
+    }
+    .category-name {
+        font-size: 1rem; font-weight: 700; color: #f1f5f9;
+        letter-spacing: -0.02em; line-height: 1.35;
+    }
+    .category-name:hover { background-color: rgba(255,255,255,0.1) !important; }
+    .category-name:focus { background-color: #fff !important; color: #1e293b; border-radius: 4px; }
+    .cat-meta {
+        font-size: 0.68rem; color: #94a3b8; letter-spacing: 0.2px; white-space: nowrap;
+        background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12);
+        padding: 4px 12px; border-radius: 20px;
+    }
+
+    /* ── Task block ── */
+    .task-block { border-top: 1px solid #f1f5f9; }
+    .task-block:first-child { border-top: none; }
+    .task-header {
+        background: #e5e5e5; min-height: 52px;
+        box-shadow: inset 3px 0 0 transparent;
+        transition: background 120ms ease, box-shadow 120ms ease;
+    }
+    .task-header:hover { background: #d9d9d9; box-shadow: inset 3px 0 0 #6366f1; }
+    .task-name { font-size: 0.875rem; font-weight: 600; color: #1e293b; line-height: 1.4; }
+
+    /* ── Task stats (inline, replaces heavy pill) ── */
+    .task-stats {
+        display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; white-space: nowrap;
+        font-size: 0.72rem; color: #64748b;
+    }
+    .ts-label { color: #94a3b8; font-weight: 700; text-transform: uppercase; font-size: 0.58rem; letter-spacing: 0.5px; flex-shrink: 0; }
+    .ts-num { font-weight: 700; color: #334155; min-width: 1.4rem; text-align: center; }
+    .ts-num.editable { border-bottom: 1.5px dashed #94a3b8; border-radius: 0; cursor: text; padding: 0 2px; }
+    .ts-num.editable:hover { background: #fef9c3 !important; border-bottom-color: transparent; border-radius: 3px; }
+    .ts-num.editable:focus { background: #fff !important; outline: 2px solid #6366f1; border-radius: 3px; border-bottom: none; color: #1e293b; }
+    .ts-unit { color: #94a3b8; font-size: 0.65rem; }
+    .ts-sep { color: #d1d5db; user-select: none; padding: 0 2px; }
+    .ts-total {
+        font-size: 0.8rem; font-weight: 700; color: #0f172a;
+        background: #f1f5f9; border-radius: 6px; padding: 2px 8px;
+        display: inline-flex; align-items: center;
+    }
+
+    /* Collapse toggle */
+    .collapse-toggle {
+        background: none; border: none; padding: 8px 10px; line-height: 1;
+        color: #94a3b8; cursor: pointer; border-radius: 8px; flex-shrink: 0;
+        transition: color 120ms, background 120ms;
+    }
+    .collapse-toggle:hover { color: #475569; background: #f0f4ff; }
+    .collapse-toggle .bi { transition: transform 240ms cubic-bezier(.4,0,.2,1); display: block; font-size: 0.85rem; }
+    .collapse-toggle[aria-expanded="false"] .bi { transform: rotate(-180deg); }
+
+    /* ── Task remarks ── */
+    .task-remarks-row {
+        background: #fbfbfb; border-top: 1px dashed #ececec;
+        font-size: 0.78rem; color: #475569;
+    }
+    .task-remarks-row .editable:empty::before {
+        content: attr(data-placeholder);
+        color: #b0b8c1; font-style: italic;
+    }
+
+    /* ── Activities ── */
+    .activities-list { background: #fafbfc; border-top: 1px solid #f0f4f8; }
+    .act-hours-col { width: 5.5rem; flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
+    .activity-row {
+        font-size: 0.82rem; color: #334155; min-height: 44px;
+        border-top: 1px solid #f3f6f9;
+        transition: background 80ms ease;
+    }
+    .activity-row:first-child { border-top: none; }
+    .activity-row:hover { background: #eef2ff; }
+    .act-est-input {
+        display: inline-block; min-width: 2.75rem; text-align: right;
+        border-bottom: 1.5px dashed #cbd5e1; border-radius: 0;
+        padding: 0 2px; font-weight: 700; color: #1e293b; font-size: 0.875rem;
+    }
+    .act-est-input:hover { background: #fef9c3 !important; border-radius: 3px; border-bottom-color: transparent; }
+    .act-est-input:focus {
+        background: #fff !important; border-radius: 3px; border-bottom: none;
+        outline: 2px solid #6366f1; outline-offset: 1px;
+    }
+    .act-h-label { font-size: 0.7rem; color: #94a3b8; font-weight: 500; }
+
+    /* ── Grand totals panel ── */
+    .totals-panel {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        border-radius: 12px; overflow: hidden;
+        box-shadow: 0 4px 20px rgba(15,23,42,0.20);
+        display: flex; align-items: stretch;
+    }
+    .totals-label {
+        font-weight: 700; font-size: 0.875rem; color: #f1f5f9;
+        letter-spacing: -0.01em; padding: 18px 24px; flex: 1;
+        border-right: 1px solid rgba(255,255,255,0.06);
+        display: flex; align-items: center;
+    }
+    .total-item { text-align: center; padding: 14px 20px; }
+    .total-item-label { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.8px; color: #475569; margin-bottom: 6px; font-weight: 700; }
+    .total-item-val { font-size: 1.05rem; font-weight: 700; color: #94a3b8; }
+    .total-item-final {
+        text-align: center; padding: 14px 24px;
+        background: rgba(99,102,241,0.14);
+        border-left: 1px solid rgba(99,102,241,0.18);
+    }
+    .total-item-final .total-item-label { color: #818cf8; font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; font-weight: 700; }
+    .total-item-final .total-item-val { font-size: 1.5rem; color: #c7d2fe; font-weight: 700; }
+
+    /* ── Remark editor ── */
+    #projectRemarkEditorWrap .ql-toolbar.ql-snow {
+        border: 1px solid #e2e8f0;
+        border-bottom: none;
+        border-radius: 10px 10px 0 0;
+        background: #f8fafc;
+        padding: 8px 10px;
+    }
+    #projectRemarkEditorWrap .ql-container.ql-snow {
+        border: 1px solid #e2e8f0;
+        border-radius: 0 0 10px 10px;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-size: 0.875rem;
+        background: #fff;
+        resize: vertical;
+        overflow-y: auto;
+        min-height: 220px;
+    }
+    #projectRemarkEditorWrap .ql-editor {
+        min-height: 220px;
+        line-height: 1.55;
+        color: #1e293b;
+    }
+    #projectRemarkEditorWrap .ql-editor.ql-blank::before {
+        color: #94a3b8;
+        font-style: normal;
+        left: 15px; right: 15px;
+    }
+    #projectRemarkEditorWrap:focus-within .ql-toolbar.ql-snow,
+    #projectRemarkEditorWrap:focus-within .ql-container.ql-snow {
+        border-color: #6366f1;
+    }
+    #projectRemarkEditorWrap:focus-within .ql-container.ql-snow {
+        box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+    }
+    #projectRemarkToolbar.ql-toolbar.ql-snow .ql-formats { margin-right: 12px; }
+    #projectRemarkToolbar .ql-stroke { stroke: #64748b; }
+    #projectRemarkToolbar .ql-fill { fill: #64748b; }
+    #projectRemarkToolbar button:hover .ql-stroke,
+    #projectRemarkToolbar button.ql-active .ql-stroke,
+    #projectRemarkToolbar .ql-picker-label:hover .ql-stroke,
+    #projectRemarkToolbar .ql-picker.ql-expanded .ql-picker-label .ql-stroke { stroke: #6366f1; }
+    #projectRemarkToolbar button:hover .ql-fill,
+    #projectRemarkToolbar button.ql-active .ql-fill,
+    #projectRemarkToolbar .ql-picker-label:hover .ql-fill { fill: #6366f1; }
+    #projectRemarkToolbar button:hover,
+    #projectRemarkToolbar button.ql-active { color: #6366f1; }
+    #projectRemarkToolbar button {
+        width: 26px; height: 26px; border-radius: 5px;
+    }
+    #projectRemarkToolbar button:hover { background: #eef2ff; }
+    #projectRemarkEditorWrap.locked .ql-toolbar.ql-snow { display: none; }
+    #projectRemarkEditorWrap.locked .ql-container.ql-snow {
+        border-radius: 10px; background: #f8fafc; resize: none;
+    }
+    #projectRemarkEditorWrap.locked .ql-editor { cursor: default; }
+
+    /* ── Empty state ── */
+    .empty-icon {
+        width: 64px; height: 64px; border-radius: 16px;
+        background: #f1f5f9; display: inline-flex;
+        align-items: center; justify-content: center;
+        font-size: 1.75rem; color: #94a3b8;
+    }
+
+    /* ── Add Category button ── */
+    #addCategoryBtn {
+        font-size: 0.8rem; border-radius: 8px !important;
+        border: 1.5px dashed #cbd5e1 !important;
+        color: #64748b !important; background: transparent !important;
+        transition: all 140ms ease;
+    }
+    #addCategoryBtn:hover {
+        background: #f0f4ff !important; border-color: #6366f1 !important; color: #6366f1 !important;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 767px) {
+        .summary-strip { flex-wrap: wrap; }
+        .ss-stat { min-width: 40%; padding: 12px 16px; }
+        .ss-sep { display: none; }
+        .ss-total { flex-basis: 100%; }
+        .ss-counts { border-left: none; border-top: 1px solid #f1f5f9; padding: 10px 16px; flex-basis: 100%; }
+        .task-stats { display: none; }
+        .preview-section-card > .card-body { padding: 0.875rem !important; }
+        .totals-panel { flex-direction: column; }
+        .totals-label { border-right: none; border-bottom: 1px solid rgba(255,255,255,0.06); }
+        .total-item-final { border-left: none; border-top: 1px solid rgba(99,102,241,0.18); padding: 14px 20px; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row align-items-end mb-4 g-3">
+    <div class="col">
+        <h2 class="preview-page-title"><i class="bi bi-table me-2 text-muted" style="font-size:1rem;"></i>Data Preview</h2>
+        <p class="preview-page-sub">
+            Review and adjust the estimated man-hours before finalizing your estimate.
+        </p>
+    </div>
+    <div class="col-12 col-md-5 col-lg-4">
+        <label for="projectName" class="form-label fw-semibold mb-1" style="font-size:0.8rem;">Project Name <span class="text-danger">*</span></label>
+        <input type="text" class="form-control form-control-sm" id="projectName" placeholder="Enter project name..." required>
+        <div class="invalid-feedback">Please enter a Project Name before exporting.</div>
+
+        <label for="createdBy" class="form-label fw-semibold mb-1 mt-2" style="font-size:0.8rem;">Created By <span class="text-danger">*</span></label>
+        <input type="text" class="form-control form-control-sm" id="createdBy" placeholder="Enter your name..." required>
+        <div class="invalid-feedback">Please enter Created By before exporting.</div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col">
+        <div class="card preview-section-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Remark</h5>
+                <small class="text-muted" style="font-size:0.72rem;" id="projectRemarkLockedBadge" hidden>
+                    <i class="bi bi-lock-fill me-1"></i>Read-only
+                </small>
+            </div>
+            <div class="card-body">
+                <div id="projectRemarkEditorWrap">
+                    <div id="projectRemarkToolbar">
+                        <span class="ql-formats">
+                            <button class="ql-bold" title="Bold"></button>
+                            <button class="ql-italic" title="Italic"></button>
+                            <button class="ql-underline" title="Underline"></button>
+                        </span>
+                        <span class="ql-formats">
+                            <select class="ql-color" title="Font Color">
+                                <option value="#000000"></option><option value="#e60000"></option><option value="#ff9900"></option><option value="#ffff00"></option><option value="#008a00"></option><option value="#0066cc"></option><option value="#9933ff"></option>
+                                <option value="#ffffff"></option><option value="#facccc"></option><option value="#ffebcc"></option><option value="#ffffcc"></option><option value="#cce8cc"></option><option value="#cce0f5"></option><option value="#ebd6ff"></option>
+                                <option value="#bbbbbb"></option><option value="#f06666"></option><option value="#ffc266"></option><option value="#ffff66"></option><option value="#66b966"></option><option value="#66a3e0"></option><option value="#c285ff"></option>
+                                <option value="#888888"></option><option value="#a10000"></option><option value="#b26b00"></option><option value="#b2b200"></option><option value="#006100"></option><option value="#0047b2"></option><option value="#6b24b2"></option>
+                                <option value="#444444"></option><option value="#5c0000"></option><option value="#663d00"></option><option value="#666600"></option><option value="#003700"></option><option value="#002966"></option><option value="#3d1466"></option>
+                                <option selected></option>
+                            </select>
+                        </span>
+                        <span class="ql-formats">
+                            <button class="ql-list" value="bullet" title="Bullet List"></button>
+                            <button class="ql-list" value="ordered" title="Numbered List"></button>
+                        </span>
+                        <span class="ql-formats">
+                            <button class="ql-undo" title="Undo"><i class="bi bi-arrow-counterclockwise"></i></button>
+                            <button class="ql-redo" title="Redo"><i class="bi bi-arrow-clockwise"></i></button>
+                        </span>
+                    </div>
+                    <div id="projectRemarkEditor"></div>
+                </div>
+                <p id="projectRemarkEmpty" class="text-muted mb-0 mt-2" style="font-size:0.85rem; display:none;">
+                    <i class="bi bi-journal-x me-1"></i>No remark added.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col">
+        <div class="card preview-section-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Selected Data</h5>
+                <div>
+                    <button class="btn btn-success btn-sm me-2" id="exportExcelBtn" style="display:none;">
+                        <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm me-2" id="clearAllBtn" style="display:none;">
+                        <i class="bi bi-trash me-1"></i>Clear All
+                    </button>
+                    <a href="/?resume=1" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-chat-dots me-1"></i>Add More / Back to Chatbot
+                    </a>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- Empty state -->
+                <div id="emptyState" class="text-center text-muted py-5" style="display:none;">
+                    <div class="empty-icon mx-auto mb-3"><i class="bi bi-inbox"></i></div>
+                    <p class="mb-1 fw-medium" style="color:#475569;">No data yet.</p>
+                    <p class="mb-3" style="font-size:0.85rem;">Use the <a href="/">Chatbot</a> to search, or add manually below.</p>
+                    <button class="btn btn-sm add-btn" id="addCategoryEmpty">
+                        <i class="bi bi-plus-circle me-1"></i>Add Category
+                    </button>
+                </div>
+
+                <!-- Data: hierarchical Category → Task → Activities -->
+                <div id="previewContent" style="display:none;">
+                    <div id="previewSummary" class="mb-4"></div>
+                    <div id="previewBody"></div>
+                    <div class="mt-3">
+                        <button class="btn btn-sm" id="addCategoryBtn">
+                            <i class="bi bi-plus-circle me-1"></i>Add Category
+                        </button>
+                    </div>
+                    <div id="previewFoot" class="mt-4"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+<script>
+(function() {
+    var raw = sessionStorage.getItem('previewData');
+    var data;
+    try { data = JSON.parse(raw || '{}'); } catch(e) { data = {}; }
+    var categories = data.categories || [];
+
+    // Project Name persistence
+    var projectNameInput = document.getElementById('projectName');
+    projectNameInput.value = data.projectName || '';
+    projectNameInput.addEventListener('input', function() {
+        data.projectName = projectNameInput.value;
+        sessionStorage.setItem('previewData', JSON.stringify(data));
+    });
+
+    // Created By persistence
+    var createdByInput = document.getElementById('createdBy');
+    createdByInput.value = data.createdBy || '';
+    createdByInput.addEventListener('input', function() {
+        data.createdBy = createdByInput.value;
+        sessionStorage.setItem('previewData', JSON.stringify(data));
+    });
+
+    // --- Remark (rich text editor) ---
+    // Whitelist-based sanitizer: defense-in-depth against pasted/hand-crafted
+    // HTML containing scripts or event-handler attributes. Quill's own
+    // clipboard matchers already strip most of this on paste, but content
+    // set programmatically (e.g. restored from a stash) isn't guaranteed
+    // to have gone through them.
+    var REMARK_ALLOWED_TAGS = { P:1, BR:1, B:1, STRONG:1, I:1, EM:1, U:1, S:1, UL:1, OL:1, LI:1, A:1, SPAN:1, DIV:1, BLOCKQUOTE:1 };
+    var REMARK_DANGEROUS_TAGS = { SCRIPT:1, STYLE:1, IFRAME:1, OBJECT:1, EMBED:1, SVG:1, FORM:1, INPUT:1, BUTTON:1 };
+    function sanitizeRemarkHtml(html) {
+        var tmp = document.createElement('div');
+        tmp.innerHTML = html || '';
+        (function clean(node) {
+            var children = Array.prototype.slice.call(node.childNodes);
+            children.forEach(function(child) {
+                if (child.nodeType === 1) {
+                    if (REMARK_DANGEROUS_TAGS[child.tagName]) {
+                        // Drop the tag AND its content entirely (never executed
+                        // since it's parsed via innerHTML into a detached div,
+                        // but strip it so it can't leak into saved/exported output).
+                        node.removeChild(child);
+                        return;
+                    }
+                    if (!REMARK_ALLOWED_TAGS[child.tagName]) {
+                        // Unwrap: keep its text/children, drop the tag itself.
+                        while (child.firstChild) node.insertBefore(child.firstChild, child);
+                        node.removeChild(child);
+                        return;
+                    }
+                    Array.prototype.slice.call(child.attributes).forEach(function(attr) {
+                        var name = attr.name.toLowerCase();
+                        var keep = false;
+                        if (child.tagName === 'A' && name === 'href' && /^(https?:|mailto:)/i.test(attr.value)) keep = true;
+                        if (child.tagName === 'SPAN' && name === 'style') keep = true;
+                        // Quill wraps both bullet and numbered lists in <ol>,
+                        // distinguishing them only via this attribute on each
+                        // <li> — stripping it makes every list look numbered.
+                        if (child.tagName === 'LI' && name === 'data-list') keep = true;
+                        if (!keep) child.removeAttribute(attr.name);
+                    });
+                    if (child.tagName === 'A') {
+                        child.setAttribute('target', '_blank');
+                        child.setAttribute('rel', 'noopener noreferrer');
+                    }
+                    clean(child);
+                } else if (child.nodeType !== 3) {
+                    node.removeChild(child); // strip comments etc.
+                }
+            });
+        })(tmp);
+        return tmp.innerHTML;
+    }
+
+    var projectRemarkWrap = document.getElementById('projectRemarkEditorWrap');
+    var projectRemarkEmpty = document.getElementById('projectRemarkEmpty');
+    var projectRemarkLockedBadge = document.getElementById('projectRemarkLockedBadge');
+    var quill = new Quill('#projectRemarkEditor', {
+        theme: 'snow',
+        placeholder: 'Enter project overview, assumptions, deployment notes, customer requirements, risks, rollback plan, or any additional project information...',
+        modules: {
+            toolbar: {
+                container: '#projectRemarkToolbar',
+                handlers: {
+                    undo: function() { quill.history.undo(); },
+                    redo: function() { quill.history.redo(); }
+                }
+            },
+            history: { delay: 800, maxStack: 200, userOnly: true }
+        }
+    });
+
+    if (data.projectRemark) {
+        quill.clipboard.dangerouslyPasteHTML(sanitizeRemarkHtml(data.projectRemark), 'silent');
+    }
+
+    function applyProjectRemarkViewState() {
+        var locked = !!data.projectRemarkLocked;
+        var isEmpty = quill.getText().trim().length === 0;
+        projectRemarkWrap.classList.toggle('locked', locked);
+        projectRemarkLockedBadge.hidden = !locked;
+        quill.enable(!locked);
+        var hideEditor = locked && isEmpty;
+        projectRemarkWrap.style.display = hideEditor ? 'none' : '';
+        projectRemarkEmpty.style.display = hideEditor ? '' : 'none';
+    }
+    applyProjectRemarkViewState();
+
+    quill.on('text-change', function() {
+        data.projectRemark = sanitizeRemarkHtml(quill.root.innerHTML);
+        sessionStorage.setItem('previewData', JSON.stringify(data));
+        applyProjectRemarkViewState();
+    });
+
+    // Clean up: remove categories with no tasks, tasks with no activities
+    categories = categories.filter(function(cat) {
+        if (!cat.tasks) cat.tasks = [];
+        cat.tasks = cat.tasks.filter(function(t) {
+            if (!t.activities) t.activities = [];
+            return t.activities.length > 0;
+        });
+        return cat.tasks.length > 0;
+    });
+
+    // Initial render
+    if (categories.length === 0) {
+        showEmpty();
+    } else {
+        showContent();
+    }
+
+    function showEmpty() {
+        document.getElementById('emptyState').style.display = '';
+        document.getElementById('previewContent').style.display = 'none';
+        document.getElementById('clearAllBtn').style.display = 'none';
+        document.getElementById('exportExcelBtn').style.display = 'none';
+    }
+
+    function showContent() {
+        document.getElementById('emptyState').style.display = 'none';
+        document.getElementById('previewContent').style.display = '';
+        document.getElementById('clearAllBtn').style.display = '';
+        document.getElementById('exportExcelBtn').style.display = '';
+        renderTable();
+    }
+
+    // Clear All button
+    document.getElementById('clearAllBtn').addEventListener('click', function() {
+        sessionStorage.removeItem('previewData');
+        categories = [];
+        showEmpty();
+    });
+
+    // Add Category from empty state
+    document.getElementById('addCategoryEmpty').addEventListener('click', function() {
+        addNewCategory();
+    });
+
+    // Add Category from table view
+    document.getElementById('addCategoryBtn').addEventListener('click', function() {
+        addNewCategory();
+    });
+
+    function addNewCategory() {
+        categories.push({
+            category: 'New Category',
+            source: 'Manual',
+            tasks: [{
+                task: 'New Task',
+                estimate_hours: 0,
+                buffer_hours: 0,
+                total_hours: 0,
+                remarks: '',
+                activities: [{
+                    task_detail: 'New Activity',
+                    estimate_hours: 0
+                }]
+            }]
+        });
+        saveData();
+        showContent();
+    }
+
+    function renderTable() {
+        renderSummary();
+        renderBody();
+        renderFooter();
+    }
+
+    function renderSummary() {
+        var taskCount = 0;
+        var actCount = 0;
+        var totals = calcTotals();
+        categories.forEach(function(cat) {
+            cat.tasks.forEach(function(t) {
+                taskCount++;
+                actCount += t.activities.length;
+            });
+        });
+
+        document.getElementById('previewSummary').innerHTML =
+            '<div class="summary-strip">' +
+                '<div class="ss-stat">' +
+                    '<span class="ss-label">Estimate</span>' +
+                    '<span class="ss-val">' + totals.estimate + '</span>' +
+                    '<span class="ss-unit">h</span>' +
+                '</div>' +
+                '<div class="ss-sep"></div>' +
+                '<div class="ss-stat">' +
+                    '<span class="ss-label">Buffer</span>' +
+                    '<span class="ss-val">' + totals.buffer + '</span>' +
+                    '<span class="ss-unit">h</span>' +
+                '</div>' +
+                '<div class="ss-sep"></div>' +
+                '<div class="ss-stat ss-total">' +
+                    '<span class="ss-label">Total</span>' +
+                    '<span class="ss-val">' + totals.final + '</span>' +
+                    '<span class="ss-unit">h</span>' +
+                '</div>' +
+                '<div class="ss-counts">' +
+                    categories.length + (categories.length === 1 ? ' category' : ' categories') + ' &nbsp;&middot;&nbsp; ' +
+                    taskCount + (taskCount === 1 ? ' task' : ' tasks') + ' &nbsp;&middot;&nbsp; ' +
+                    actCount + (actCount === 1 ? ' activity' : ' activities') +
+                '</div>' +
+            '</div>';
+    }
+
+    function renderBody() {
+        var container = document.getElementById('previewBody');
+        var html = '';
+
+        categories.forEach(function(cat, ci) {
+            var catTotal = 0;
+            cat.tasks.forEach(function(t) { catTotal += t.total_hours; });
+
+            // ── Category card ──
+            html += '<div class="category-card card mb-3">';
+
+            // Category header — no add button here
+            html +=
+                '<div class="category-header d-flex align-items-center gap-2 px-3 py-2">' +
+                    '<button class="del-btn flex-shrink-0" data-del="category" data-ci="' + ci + '" title="Delete category">&times;</button>' +
+                    '<span class="editable category-name flex-grow-1" contenteditable="true" data-field="category" data-ci="' + ci + '">' + esc(cat.category) + '</span>' +
+                    '<small class="cat-meta text-nowrap" data-ci="' + ci + '">' + cat.tasks.length + ' task(s) &middot; ' + catTotal + 'h</small>' +
+                '</div>';
+
+            // Tasks wrapper
+            html += '<div class="tasks-wrapper">';
+
+            cat.tasks.forEach(function(task, ti) {
+                var collapseId = 'tc-' + ci + '-' + ti;
+
+                html += '<div class="task-block">';
+
+                // Task header row — no add button here
+                html +=
+                    '<div class="task-header d-flex align-items-center gap-2 px-3 py-2">' +
+                        '<button class="del-btn flex-shrink-0" data-del="task" data-ci="' + ci + '" data-ti="' + ti + '" title="Delete task">&times;</button>' +
+                        '<span class="editable task-name flex-grow-1" contenteditable="true" data-field="task" data-ci="' + ci + '" data-ti="' + ti + '">' + esc(task.task) + '</span>' +
+                        '<div class="task-stats">' +
+                            '<span class="ts-label">Est</span>' +
+                            '<span data-sum="estimate" data-ci="' + ci + '" data-ti="' + ti + '" class="ts-num">' + task.estimate_hours + '</span>' +
+                            '<span class="ts-unit">h</span>' +
+                            '<span class="ts-sep">&middot;</span>' +
+                            '<span class="ts-label">Buf</span>' +
+                            '<span class="editable ts-num" contenteditable="true" data-field="buffer" data-ci="' + ci + '" data-ti="' + ti + '">' + task.buffer_hours + '</span>' +
+                            '<span class="ts-unit">h</span>' +
+                            '<span class="ts-sep">&middot;</span>' +
+                            '<strong class="ts-total"><span data-sum="final" data-ci="' + ci + '" data-ti="' + ti + '">' + task.total_hours + '</span>h</strong>' +
+                        '</div>' +
+                        '<button class="collapse-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" aria-expanded="true">' +
+                            '<i class="bi bi-chevron-up"></i>' +
+                        '</button>' +
+                    '</div>';
+
+                // Remarks row
+                html +=
+                    '<div class="task-remarks-row d-flex align-items-center gap-2 px-3 py-2">' +
+                        '<span class="ts-label flex-shrink-0">Remarks</span>' +
+                        '<span class="editable flex-grow-1" contenteditable="true" data-field="remarks" data-ci="' + ci + '" data-ti="' + ti + '" data-placeholder="Add remarks...">' + esc(task.remarks) + '</span>' +
+                    '</div>';
+
+                // Activities (collapsible)
+                html += '<div class="collapse show" id="' + collapseId + '">';
+                html += '<div class="activities-list">';
+
+                // Activity rows
+                task.activities.forEach(function(act, ai) {
+                    html +=
+                        '<div class="activity-row d-flex align-items-center gap-2 px-3 py-2">' +
+                            '<button class="del-btn flex-shrink-0" data-del="activity" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '" title="Delete activity">&times;</button>' +
+                            '<span class="editable flex-grow-1" contenteditable="true" data-field="task_detail" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '">' + esc(act.task_detail) + '</span>' +
+                            '<div class="d-flex align-items-center gap-1 act-hours-col justify-content-end">' +
+                                '<span class="editable act-est-input" contenteditable="true" data-field="act_estimate" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '">' + act.estimate_hours + '</span>' +
+                                '<span class="act-h-label">h</span>' +
+                            '</div>' +
+                        '</div>';
+                });
+
+                // + Add Activity — inside the activities section where it will appear
+                html +=
+                    '<div class="act-footer px-3 py-2">' +
+                        '<button class="add-btn btn btn-sm" data-add="activity" data-ci="' + ci + '" data-ti="' + ti + '">' +
+                            '<i class="bi bi-plus-circle me-1"></i>Add Activity' +
+                        '</button>' +
+                    '</div>';
+
+                html += '</div>'; // activities-list
+                html += '</div>'; // collapse
+                html += '</div>'; // task-block
+            });
+
+            html += '</div>'; // tasks-wrapper
+
+            // + Add Task — inside the category card, below all tasks
+            html +=
+                '<div class="cat-footer px-3 py-2">' +
+                    '<button class="add-btn btn btn-sm" data-add="task" data-ci="' + ci + '">' +
+                        '<i class="bi bi-plus-circle me-1"></i>Add Task' +
+                    '</button>' +
+                '</div>';
+
+            html += '</div>'; // category-card
+        });
+
+        container.innerHTML = html;
+    }
+
+    function renderFooter() {
+        var totals = calcTotals();
+        document.getElementById('previewFoot').innerHTML =
+            '<div class="totals-panel">' +
+                '<span class="totals-label">Grand Total</span>' +
+                '<div class="total-item"><div class="total-item-label">Estimate</div><div class="total-item-val">' + totals.estimate + 'h</div></div>' +
+                '<div class="total-item"><div class="total-item-label">Buffer</div><div class="total-item-val">' + totals.buffer + 'h</div></div>' +
+                '<div class="total-item total-item-final"><div class="total-item-label">Grand Total</div><div class="total-item-val">' + totals.final + 'h</div></div>' +
+            '</div>';
+    }
+
+    function calcTotals() {
+        var t = { task_estimate: 0, estimate: 0, buffer: 0, final: 0 };
+        categories.forEach(function(cat) {
+            cat.tasks.forEach(function(task) {
+                t.estimate += task.estimate_hours;
+                t.buffer += task.buffer_hours;
+                t.final += task.total_hours;
+                task.activities.forEach(function(act) {
+                    t.task_estimate += act.estimate_hours;
+                });
+            });
+        });
+        return t;
+    }
+
+    function saveData() {
+        sessionStorage.setItem('previewData', JSON.stringify({
+            categories: categories,
+            totals: calcTotals(),
+            projectName: projectNameInput.value,
+            createdBy: createdByInput.value,
+            projectRemark: data.projectRemark || '',
+            projectRemarkLocked: !!data.projectRemarkLocked
+        }));
+    }
+
+    function recalcTask(ci, ti) {
+        var task = categories[ci].tasks[ti];
+        var est = 0;
+        task.activities.forEach(function(a) { est += a.estimate_hours; });
+        task.estimate_hours = est;
+        task.total_hours = est + task.buffer_hours;
+
+        // Update the estimate and final cells in the DOM without full re-render
+        var estCell = document.querySelector('[data-sum="estimate"][data-ci="' + ci + '"][data-ti="' + ti + '"]');
+        var finalCell = document.querySelector('[data-sum="final"][data-ci="' + ci + '"][data-ti="' + ti + '"]');
+        if (estCell) estCell.textContent = task.estimate_hours;
+        if (finalCell) finalCell.textContent = task.total_hours;
+
+        // Update the category header meta pill (e.g. "1 task(s) · 3h")
+        var catTotal = 0;
+        categories[ci].tasks.forEach(function(t) { catTotal += t.total_hours; });
+        var catMeta = document.querySelector('.cat-meta[data-ci="' + ci + '"]');
+        if (catMeta) catMeta.innerHTML = categories[ci].tasks.length + ' task(s) &middot; ' + catTotal + 'h';
+
+        renderFooter();
+        renderSummary();
+        saveData();
+    }
+
+    // Handle edits via blur event delegation
+    document.getElementById('previewBody').addEventListener('blur', function(e) {
+        var el = e.target;
+        if (!el.hasAttribute('data-field')) return;
+
+        var field = el.getAttribute('data-field');
+        var ci = parseInt(el.getAttribute('data-ci'), 10);
+        var ti = el.hasAttribute('data-ti') ? parseInt(el.getAttribute('data-ti'), 10) : null;
+        var ai = el.hasAttribute('data-ai') ? parseInt(el.getAttribute('data-ai'), 10) : null;
+        var val = el.textContent.trim();
+
+        if (field === 'category') {
+            categories[ci].category = val;
+            saveData();
+        }
+        else if (field === 'task') {
+            categories[ci].tasks[ti].task = val;
+            saveData();
+        }
+        else if (field === 'remarks') {
+            categories[ci].tasks[ti].remarks = val;
+            saveData();
+        }
+        else if (field === 'task_detail') {
+            categories[ci].tasks[ti].activities[ai].task_detail = val;
+            saveData();
+        }
+        else if (field === 'act_estimate') {
+            var num = parseFloat(val);
+            if (isNaN(num)) num = 0;
+            categories[ci].tasks[ti].activities[ai].estimate_hours = num;
+            el.textContent = num;
+            recalcTask(ci, ti);
+        }
+        else if (field === 'buffer') {
+            var num = parseFloat(val);
+            if (isNaN(num)) num = 0;
+            categories[ci].tasks[ti].buffer_hours = num;
+            el.textContent = num;
+            recalcTask(ci, ti);
+        }
+    }, true);
+
+    // Prevent Enter key from adding newlines — commit edit instead
+    document.getElementById('previewBody').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && e.target.hasAttribute('data-field')) {
+            e.preventDefault();
+            e.target.blur();
+        }
+    });
+
+    // Handle add and delete buttons
+    document.getElementById('previewBody').addEventListener('click', function(e) {
+        // --- Add buttons ---
+        var addBtn = e.target.closest('.add-btn');
+        if (addBtn) {
+            var addType = addBtn.getAttribute('data-add');
+            var ci = parseInt(addBtn.getAttribute('data-ci'), 10);
+
+            if (addType === 'task') {
+                categories[ci].tasks.push({
+                    task: 'New Task',
+                    estimate_hours: 0,
+                    buffer_hours: 0,
+                    total_hours: 0,
+                    activities: [{
+                        task_detail: 'New Activity',
+                        estimate_hours: 0
+                    }]
+                });
+            }
+            else if (addType === 'activity') {
+                var ti = parseInt(addBtn.getAttribute('data-ti'), 10);
+                categories[ci].tasks[ti].activities.push({
+                    task_detail: 'New Activity',
+                    estimate_hours: 0
+                });
+            }
+
+            saveData();
+            renderTable();
+            return;
+        }
+
+        // --- Delete buttons ---
+        var btn = e.target.closest('.del-btn');
+        if (!btn) return;
+
+        var delType = btn.getAttribute('data-del');
+        var ci = parseInt(btn.getAttribute('data-ci'), 10);
+
+        if (delType === 'category') {
+            categories.splice(ci, 1);
+        }
+        else if (delType === 'task') {
+            var ti = parseInt(btn.getAttribute('data-ti'), 10);
+            categories[ci].tasks.splice(ti, 1);
+            // Remove category if no tasks left
+            if (categories[ci].tasks.length === 0) {
+                categories.splice(ci, 1);
+            }
+        }
+        else if (delType === 'activity') {
+            var ti = parseInt(btn.getAttribute('data-ti'), 10);
+            var ai = parseInt(btn.getAttribute('data-ai'), 10);
+            categories[ci].tasks[ti].activities.splice(ai, 1);
+            // Recalc task totals
+            if (categories[ci].tasks[ti].activities.length > 0) {
+                var task = categories[ci].tasks[ti];
+                var est = 0;
+                task.activities.forEach(function(a) { est += a.estimate_hours; });
+                task.estimate_hours = est;
+                task.total_hours = est + task.buffer_hours;
+            } else {
+                // Remove task if no activities left
+                categories[ci].tasks.splice(ti, 1);
+                if (categories[ci].tasks.length === 0) {
+                    categories.splice(ci, 1);
+                }
+            }
+        }
+
+        saveData();
+
+        if (categories.length === 0) {
+            sessionStorage.removeItem('previewData');
+            location.reload();
+            return;
+        }
+
+        renderTable();
+    });
+
+    // Export to Excel
+    // Clear validation state on input
+    projectNameInput.addEventListener('input', function() {
+        if (projectNameInput.value.trim()) {
+            projectNameInput.classList.remove('is-invalid');
+        }
+    });
+    createdByInput.addEventListener('input', function() {
+        if (createdByInput.value.trim()) {
+            createdByInput.classList.remove('is-invalid');
+        }
+    });
+
+    document.getElementById('exportExcelBtn').addEventListener('click', function() {
+        var pName = projectNameInput.value.trim();
+        var cBy = createdByInput.value.trim();
+        var hasError = false;
+
+        if (!pName) {
+            projectNameInput.classList.add('is-invalid');
+            hasError = true;
+        } else {
+            projectNameInput.classList.remove('is-invalid');
+        }
+
+        if (!cBy) {
+            createdByInput.classList.add('is-invalid');
+            hasError = true;
+        } else {
+            createdByInput.classList.remove('is-invalid');
+        }
+
+        if (hasError) {
+            (!pName ? projectNameInput : createdByInput).focus();
+            return;
+        }
+
+        var btn = this;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Exporting...';
+
+        fetch('/export/excel', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ projectName: pName, createdBy: cBy, projectRemark: data.projectRemark || '', categories: categories })
+        })
+        .then(function(response) {
+            if (!response.ok) {
+                return response.json().then(function(d) { throw new Error(d.error || 'Export failed'); });
+            }
+            return response.blob();
+        })
+        .then(function(blob) {
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = pName.replace(/[\\/*?:"<>|]/g, '_') + '_manhour.xlsx';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            // Export succeeded and is safely saved server-side (and now
+            // viewable/downloadable again from "Exported Files") — clear
+            // everything here, including sessionStorage, so an accidental
+            // browser close or navigation afterward can't re-stash this
+            // now-redundant data as if it were still unsaved work.
+            categories = [];
+            data.categories = categories;
+            data.projectRemark = '';
+            data.projectRemarkLocked = false;
+            projectNameInput.value = '';
+            projectNameInput.classList.remove('is-invalid');
+            createdByInput.value = '';
+            createdByInput.classList.remove('is-invalid');
+            // quill.setText('') fires the 'text-change' listener above,
+            // which re-writes sessionStorage from `data` — so clear
+            // sessionStorage AFTER, to make sure it's the last write.
+            quill.setText('');
+            sessionStorage.removeItem('previewData');
+            applyProjectRemarkViewState();
+            showEmpty();
+        })
+        .catch(function(err) {
+            alert('Export failed: ' + err.message);
+        })
+        .finally(function() {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-file-earmark-excel me-1"></i>Export Excel';
+        });
+    });
+
+    function esc(str) {
+        var div = document.createElement('div');
+        div.textContent = str || '';
+        return div.innerHTML;
+    }
+
+    // Safety net: if the tab/browser is closed (or refreshed, or the user
+    // navigates to a URL outside the app) while Preview has unsaved data,
+    // stash it on the server so it isn't lost. Uses sendBeacon since it's
+    // the only reliable way to fire a request as the page unloads. Skipped
+    // for normal in-app link clicks (see base.html), since previewData
+    // already persists across those via sessionStorage.
+    window.addEventListener('pagehide', function() {
+        var internalNav = sessionStorage.getItem('mhes_internal_nav');
+        sessionStorage.removeItem('mhes_internal_nav');
+        if (internalNav) return;
+        if (categories.length === 0) return;
+
+        var payload = JSON.stringify({
+            categories: categories,
+            totals: calcTotals(),
+            projectName: projectNameInput.value,
+            createdBy: createdByInput.value,
+            projectRemark: data.projectRemark || ''
+        });
+        navigator.sendBeacon('/preview/temp/stashes', new Blob([payload], { type: 'application/json' }));
+    });
+})();
+</script>
+{% endblock %}

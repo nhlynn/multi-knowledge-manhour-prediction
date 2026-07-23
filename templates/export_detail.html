@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+{% block title %}{{ project_name }} — Export Detail{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* ---------- Header ---------- */
+    .preview-page-title {
+        font-size: 1.3rem; font-weight: 700; color: var(--text-primary, #0f172a);
+        letter-spacing: -0.025em; margin: 0; line-height: 1.3;
+        display: flex; align-items: center;
+    }
+    .preview-page-sub { font-size: 0.82rem; color: var(--text-secondary, #64748b); margin-top: 4px; margin-bottom: 0; }
+
+    .export-header-actions { display: flex; align-items: center; gap: 0.5rem; }
+    .export-header-actions .btn {
+        display: inline-flex; align-items: center; gap: 0.4rem;
+        font-weight: 600; letter-spacing: 0.01em;
+        transition: transform var(--transition, 200ms) ease, box-shadow var(--transition, 200ms) ease,
+            background-color var(--transition, 200ms) ease, color var(--transition, 200ms) ease;
+    }
+    .export-header-actions .btn:hover { transform: translateY(-1px); }
+    .export-header-actions .btn:focus-visible,
+    .remark-hyperlink:focus-visible,
+    .export-table a:focus-visible {
+        outline: 2px solid var(--accent, #6366f1);
+        outline-offset: 2px;
+        border-radius: 6px;
+    }
+
+    /* ---------- Section cards ---------- */
+    .preview-section-card {
+        border-radius: 14px !important; overflow: hidden;
+        border: 1px solid var(--border, #e2e8f0) !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 28px rgba(0,0,0,0.05) !important;
+    }
+    .preview-section-card > .card-header {
+        background: #ffffff !important;
+        border-bottom: 1px solid var(--border-light, #f1f5f9) !important;
+        padding: 0.875rem 1.375rem !important;
+        display: flex; align-items: center; justify-content: space-between;
+    }
+    .preview-section-card > .card-header h5 {
+        font-size: 0.9rem; font-weight: 600; color: var(--text-primary, #0f172a);
+        letter-spacing: -0.01em; display: flex; align-items: center; gap: 0.45rem;
+    }
+    .preview-section-card > .card-header h5 i { color: var(--accent, #6366f1); font-size: 0.95rem; }
+    .preview-section-card > .card-body { padding: 1.25rem !important; }
+
+    /* ---------- Project information grid ---------- */
+    .meta-strip {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 1.25rem 2rem;
+    }
+    .meta-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .meta-label {
+        font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.6px; color: var(--text-tertiary, #94a3b8);
+    }
+    .meta-val {
+        font-size: 0.95rem; font-weight: 600; color: var(--text-primary, #0f172a);
+        overflow-wrap: anywhere;
+    }
+
+    /* ---------- Selected Data table ---------- */
+    .export-table-wrap {
+        border: 1px solid var(--border, #e2e8f0);
+        border-radius: 12px;
+        overflow: auto;
+        max-height: 70vh;
+    }
+    table.export-table {
+        margin-bottom: 0;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 0.875rem;
+    }
+    table.export-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: #1e2433;
+        color: #fff;
+        font-weight: 600;
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 0.75rem 1rem;
+        border: none;
+        white-space: nowrap;
+    }
+    table.export-table thead th:first-child { border-top-left-radius: 12px; }
+    table.export-table thead th:last-child { border-top-right-radius: 12px; }
+
+    table.export-table tbody td {
+        padding: 0.7rem 1rem;
+        border-bottom: 1px solid var(--border-light, #f1f5f9);
+        color: var(--text-primary, #0f172a);
+        vertical-align: middle;
+    }
+    table.export-table tbody tr:last-child td { border-bottom: none; }
+
+    /* zebra striping (excluding the total row) */
+    table.export-table tbody tr.data-row:nth-of-type(odd) { background-color: #ffffff; }
+    table.export-table tbody tr.data-row:nth-of-type(even) { background-color: var(--surface-secondary, #f8fafc); }
+    table.export-table tbody tr.data-row:hover td { background-color: var(--accent-light, rgba(99,102,241,0.08)); }
+
+    .export-table .cat-cell {
+        font-weight: 700;
+        color: var(--text-primary, #0f172a);
+        background-color: #eef1f8 !important;
+        border-right: 1px solid var(--border, #e2e8f0);
+    }
+
+    .export-table .num-col { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .export-table .total-row td {
+        background: #d9e1f2 !important;
+        font-weight: 700;
+        color: #1e2a4a;
+        border-top: 2px solid #b9c6e6;
+        font-size: 0.9rem;
+    }
+
+    /* ---------- Remark ---------- */
+    .remark-box {
+        border: 1px solid var(--border, #e2e8f0);
+        border-radius: 10px;
+        padding: 1.1rem 1.35rem;
+        font-size: 0.9rem;
+        color: #1e293b;
+        line-height: 1.7;
+        white-space: normal;
+    }
+    .remark-box p:last-child { margin-bottom: 0; }
+    .remark-hyperlink {
+        font-size: 0.8rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    /* ---------- Print ---------- */
+    @media print {
+        .export-header-actions,
+        .app-sidebar,
+        .app-topbar,
+        .no-print {
+            display: none !important;
+        }
+        body, .app-content, .container-fluid {
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        .preview-section-card {
+            box-shadow: none !important;
+            border: 1px solid #d0d0d0 !important;
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+        .export-table-wrap {
+            max-height: none !important;
+            overflow: visible !important;
+        }
+        table.export-table thead th {
+            position: static;
+            background: #1e2433 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+        table.export-table tr {
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+        .export-table .total-row td,
+        .export-table .cat-cell {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+        @page { size: A4; margin: 14mm; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row align-items-end mb-4 g-3">
+    <div class="col">
+        <h2 class="preview-page-title">
+            <i class="bi bi-file-earmark-excel me-2 text-muted" style="font-size:1rem;" aria-hidden="true"></i>
+            <span>{{ project_name }}</span>
+        </h2>
+        <p class="preview-page-sub">Read-only view of {{ filename }}.</p>
+    </div>
+    <div class="col-auto">
+        <div class="export-header-actions no-print">
+            <a href="{{ url_for('export.download_export', filename=filename) }}"
+               class="btn btn-success btn-sm mhes-download-link"
+               aria-label="Download {{ filename }} as Excel file">
+                <i class="bi bi-download" aria-hidden="true"></i>Download Excel
+            </a>
+            <!-- <a href="{{ url_for('export.list_exports') }}"
+               class="btn btn-outline-primary btn-sm"
+               aria-label="Back to Export History">
+                <i class="bi bi-arrow-left" aria-hidden="true"></i>Back to Export History
+            </a> -->
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col">
+        <div class="card preview-section-card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle" aria-hidden="true"></i>Project Information</h5>
+            </div>
+            <div class="card-body">
+                <div class="meta-strip">
+                    <div class="meta-item">
+                        <span class="meta-label" id="meta-label-project">Project Name</span>
+                        <span class="meta-val" aria-labelledby="meta-label-project">{{ project_name }}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label" id="meta-label-createdby">Created By</span>
+                        <span class="meta-val" aria-labelledby="meta-label-createdby">{{ created_by or '-' }}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label" id="meta-label-date">Created Date</span>
+                        <span class="meta-val" aria-labelledby="meta-label-date">{{ date_str or '-' }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col">
+        <div class="card preview-section-card">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-table" aria-hidden="true"></i>Selected Data</h5></div>
+            <div class="card-body">
+                <div class="export-table-wrap">
+                    <table class="table export-table" aria-label="Selected task data with estimates">
+                        <caption class="visually-hidden">Selected categories, tasks, estimated hours, working days and remarks</caption>
+                        <thead>
+                            <tr>
+                                <th scope="col">Category</th>
+                                <th scope="col">Task List</th>
+                                <th scope="col" class="num-col">Estimate (Hours)</th>
+                                <th scope="col" class="num-col">Working Day</th>
+                                <th scope="col">Remarks</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for cat in categories %}
+                                {% for row in cat.rows %}
+                                <tr class="data-row">
+                                    {% if loop.first %}
+                                    <td rowspan="{{ cat.rows|length }}" class="cat-cell">{{ cat.name }}</td>
+                                    {% endif %}
+                                    <td>{{ row.task }}</td>
+                                    <td class="num-col">{{ row.estimate }}</td>
+                                    <td class="num-col">{{ row.working_day }}</td>
+                                    <td>{{ row.remarks }}</td>
+                                </tr>
+                                {% endfor %}
+                            {% endfor %}
+                            <tr class="total-row">
+                                <td colspan="2">Total</td>
+                                <td class="num-col">{{ grand_total }}</td>
+                                <td class="num-col">{{ grand_working_day }}</td>
+                                <td></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col">
+        <div class="card preview-section-card">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-chat-square-text" aria-hidden="true"></i>Remark</h5></div>
+            <div class="card-body">
+                <div class="remark-box" style="{% if remark_bg %}background-color: {{ remark_bg }};{% endif %}">
+                    {{ remark_html | safe }}
+                </div>
+                {% if remark_hyperlink %}
+                <p class="mt-2 mb-0 remark-hyperlink">
+                    <i class="bi bi-link-45deg" aria-hidden="true"></i>
+                    <a href="{{ remark_hyperlink }}" target="_blank" rel="noopener noreferrer">{{ remark_hyperlink }}</a>
+                </p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    // Download resolves to a redirect to a signed GCS URL; the browser
+    // stays on this page while the file downloads in the background, so
+    // the overlay's auto-hide timeout clears it rather than a navigation.
+    var link = document.querySelector('.mhes-download-link');
+    if (link) {
+        link.addEventListener('click', function() {
+            window.MHES.showLoading('Preparing download...', 4000);
+        });
+    }
+})();
+</script>
+{% endblock %}

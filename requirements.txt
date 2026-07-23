@@ -1,0 +1,26 @@
+# MHES - Man Hour Estimation System
+# Core
+Flask==3.1.1
+python-dotenv==1.1.0
+Jinja2==3.1.6
+
+# Data Processing
+pandas==2.2.3
+openpyxl==3.1.5
+
+# AI / ML
+sentence-transformers==3.4.1
+faiss-cpu==1.9.0.post1
+ollama==0.4.8
+
+# Logging
+colorlog==6.9.0
+
+# Scheduling
+APScheduler==3.11.3
+
+# Production Server
+waitress==3.0.2
+
+# Cloud Storage (export file storage)
+google-cloud-storage==3.13.0

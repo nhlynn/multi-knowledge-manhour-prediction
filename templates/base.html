@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}MHES{% endblock %} - Man Hour Estimation System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --sidebar-width: 232px;
+            --sidebar-collapsed: 58px;
+            --sidebar-bg: #111827;
+            --sidebar-hover: rgba(255,255,255,0.055);
+            --sidebar-active-bg: rgba(99,102,241,0.14);
+            --sidebar-active-text: #a5b4fc;
+            --sidebar-border: rgba(255,255,255,0.07);
+            --accent: #6366f1;
+            --accent-hover: #4f46e5;
+            --accent-light: rgba(99,102,241,0.08);
+            --text-primary: #0f172a;
+            --text-secondary: #64748b;
+            --text-tertiary: #94a3b8;
+            --surface: #ffffff;
+            --surface-secondary: #f8fafc;
+            --surface-hover: #f1f5f9;
+            --border: #e2e8f0;
+            --border-light: #f1f5f9;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.04);
+            --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+            --radius: 10px;
+            --radius-lg: 12px;
+            --transition: 200ms cubic-bezier(.4,0,.2,1);
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            overflow: hidden;
+            background: var(--surface-secondary);
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* ─── App Shell ─── */
+        .app-wrapper { display: flex; height: 100vh; }
+
+        /* ─── Sidebar ─── */
+        .sidebar {
+            width: var(--sidebar-width);
+            min-width: var(--sidebar-width);
+            background: var(--sidebar-bg);
+            display: flex;
+            flex-direction: column;
+            transition: width var(--transition), min-width var(--transition);
+            overflow: hidden;
+            z-index: 20;
+            box-shadow: 1px 0 0 rgba(255,255,255,0.04);
+        }
+        .sidebar.collapsed {
+            width: var(--sidebar-collapsed);
+            min-width: var(--sidebar-collapsed);
+        }
+
+        /* Brand */
+        .sidebar-brand {
+            display: flex;
+            align-items: center;
+            padding: 0 0.875rem;
+            gap: 0.75rem;
+            white-space: nowrap;
+            border-bottom: 1px solid var(--sidebar-border);
+            text-decoration: none;
+            color: #fff;
+            height: 58px;
+            flex-shrink: 0;
+        }
+        .sidebar-brand:hover { color: #fff; }
+
+        .brand-icon {
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9375rem;
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(99,102,241,0.45);
+            flex-shrink: 0;
+            transition: transform 200ms ease, box-shadow 200ms ease;
+        }
+        .sidebar-brand:hover .brand-icon {
+            transform: scale(1.1) rotate(-4deg);
+            box-shadow: 0 4px 16px rgba(99,102,241,0.6);
+        }
+
+        .brand-text-wrap {
+            overflow: hidden;
+            transition: opacity var(--transition), max-width var(--transition);
+            max-width: 160px;
+        }
+        .brand-name {
+            display: block;
+            font-weight: 700;
+            font-size: 0.9375rem;
+            color: #f1f5f9;
+            line-height: 1.25;
+            letter-spacing: 0.2px;
+        }
+        .brand-sub {
+            display: block;
+            font-size: 0.625rem;
+            color: #4b5563;
+            font-weight: 500;
+            letter-spacing: 0.7px;
+            text-transform: uppercase;
+            margin-top: 1px;
+        }
+        .sidebar.collapsed .brand-text-wrap { opacity: 0; max-width: 0; }
+
+        /* Section labels */
+        .sidebar-section-label {
+            font-size: 0.625rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.9px;
+            color: #374151;
+            padding: 1.125rem 1rem 0.375rem;
+            white-space: nowrap;
+            overflow: hidden;
+            transition: opacity var(--transition), height var(--transition), padding var(--transition);
+        }
+        .sidebar.collapsed .sidebar-section-label {
+            opacity: 0; height: 0; padding: 0;
+        }
+
+        /* Nav */
+        .sidebar-nav-scroll {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        .sidebar-nav {
+            padding: 0.375rem 0;
+            list-style: none;
+            margin: 0;
+        }
+        .sidebar-nav li { padding: 1px 8px; }
+
+        .sidebar-nav a {
+            display: flex;
+            align-items: center;
+            padding: 0.5625rem 0.75rem;
+            gap: 0.75rem;
+            color: #6b7280;
+            text-decoration: none;
+            white-space: nowrap;
+            border-radius: 8px;
+            transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            position: relative;
+        }
+        .sidebar-nav a:hover {
+            background: var(--sidebar-hover);
+            color: #d1d5db;
+            transform: translateX(2px);
+        }
+        .sidebar.collapsed .sidebar-nav a:hover { transform: none; }
+        .sidebar-nav a.active {
+            background: var(--sidebar-active-bg);
+            color: var(--sidebar-active-text);
+        }
+        @keyframes activeBarIn {
+            from { height: 0; opacity: 0; }
+            to   { height: 18px; opacity: 1; }
+        }
+        .sidebar-nav a.active::before {
+            content: '';
+            position: absolute;
+            left: -8px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 3px;
+            height: 18px;
+            border-radius: 0 3px 3px 0;
+            background: var(--accent);
+            animation: activeBarIn 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .sidebar-nav a i {
+            font-size: 1.0625rem;
+            min-width: 20px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .nav-label {
+            overflow: hidden;
+            transition: opacity var(--transition);
+            flex: 1;
+        }
+        .sidebar.collapsed .nav-label { opacity: 0; width: 0; }
+        .sidebar.collapsed .sidebar-nav li { padding: 1px 6px; }
+        .sidebar.collapsed .sidebar-nav a { justify-content: center; gap: 0; }
+
+        /* Account (login/logout) — a <button> made to look like the .sidebar-nav a links above */
+        .sidebar-nav button.nav-btn {
+            all: unset;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            width: 100%;
+            padding: 0.5625rem 0.75rem;
+            gap: 0.75rem;
+            color: #6b7280;
+            white-space: nowrap;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            transition: background 160ms ease, color 160ms ease;
+        }
+        .sidebar-nav button.nav-btn:hover { background: var(--sidebar-hover); color: #d1d5db; }
+        .sidebar-account-info {
+            padding: 0.5625rem 0.75rem;
+            color: #9ca3af;
+            font-size: 0.75rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .sidebar.collapsed .sidebar-account-info { display: none; }
+
+        .nav-badge {
+            margin-left: auto;
+            font-size: 0.6rem;
+            padding: 2px 6px;
+            font-weight: 600;
+        }
+        .sidebar.collapsed .nav-badge {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            margin-left: 0;
+            font-size: 0.5rem;
+            padding: 1px 4px;
+            min-width: 14px;
+            text-align: center;
+        }
+
+        /* Sidebar toggle */
+        .sidebar-toggle {
+            border: none;
+            background: none;
+            color: #374151;
+            padding: 0.75rem 0.875rem;
+            width: 100%;
+            text-align: left;
+            cursor: pointer;
+            border-top: 1px solid var(--sidebar-border);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            white-space: nowrap;
+            font-size: 0.75rem;
+            font-weight: 500;
+            transition: color 140ms ease, background 140ms ease;
+            font-family: inherit;
+        }
+        .sidebar-toggle:hover { color: #9ca3af; background: var(--sidebar-hover); }
+        .sidebar-toggle i {
+            font-size: 0.875rem;
+            min-width: 20px;
+            text-align: center;
+            transition: transform 240ms ease;
+            flex-shrink: 0;
+        }
+        .sidebar.collapsed .sidebar-toggle i { transform: rotate(180deg); }
+        .toggle-label {
+            overflow: hidden;
+            transition: opacity var(--transition);
+        }
+        .sidebar.collapsed .toggle-label { opacity: 0; width: 0; }
+
+        /* ─── Main Content ─── */
+        .app-main {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            background: var(--surface-secondary);
+        }
+
+        /* ─── Cards ─── */
+        .card {
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+            background: var(--surface);
+        }
+        .card-header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border-light);
+            font-weight: 600;
+            padding: 0.875rem 1.25rem;
+            font-size: 0.875rem;
+            border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        }
+        .card-body { padding: 1.25rem; }
+
+        /* ─── Tables ─── */
+        .table { font-size: 0.8125rem; color: var(--text-primary); }
+        .table thead th {
+            font-weight: 600;
+            font-size: 0.6875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            border-bottom-width: 1px;
+            white-space: nowrap;
+        }
+        .table > :not(caption) > * > * { padding: 0.625rem 0.875rem; }
+
+        /* ─── Buttons ─── */
+        .btn {
+            font-weight: 500;
+            border-radius: 8px;
+            font-size: 0.8125rem;
+            padding: 0.5rem 1rem;
+            transition: all 140ms ease;
+            letter-spacing: 0.1px;
+        }
+        .btn-primary { background: var(--accent); border-color: var(--accent); }
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            border-color: var(--accent-hover);
+            box-shadow: 0 2px 8px rgba(99,102,241,0.28);
+        }
+        .btn-success { background: #10b981; border-color: #10b981; }
+        .btn-success:hover { background: #059669; border-color: #059669; box-shadow: 0 2px 8px rgba(16,185,129,0.22); }
+        .btn-info { background: #0ea5e9; border-color: #0ea5e9; color: #fff; }
+        .btn-info:hover { background: #0284c7; border-color: #0284c7; color: #fff; }
+        .btn-outline-primary { color: var(--accent); border-color: var(--accent); }
+        .btn-outline-primary:hover { background: var(--accent); border-color: var(--accent); }
+        .btn-outline-danger:hover { box-shadow: 0 2px 8px rgba(220,38,38,0.18); }
+        .btn-sm { font-size: 0.75rem; padding: 0.375rem 0.75rem; }
+
+        /* ─── Forms ─── */
+        .form-control, .form-select {
+            border-radius: 8px;
+            border: 1.5px solid var(--border);
+            font-size: 0.8125rem;
+            padding: 0.5625rem 0.875rem;
+            color: var(--text-primary);
+            transition: border-color 150ms, box-shadow 150ms;
+            background: var(--surface);
+        }
+        .form-control:focus, .form-select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
+        }
+        .form-control::placeholder { color: var(--text-tertiary); }
+        .form-label { font-weight: 500; font-size: 0.8125rem; color: var(--text-primary); margin-bottom: 0.375rem; }
+
+        /* ─── Alerts ─── */
+        .alert { border-radius: var(--radius); font-size: 0.8125rem; border: none; }
+        .alert-info { background: #eff6ff; color: #1d4ed8; }
+        .alert-warning { background: #fffbeb; color: #92400e; }
+        .alert-danger { background: #fef2f2; color: #991b1b; }
+        .alert-success { background: #f0fdf4; color: #14532d; }
+
+        /* ─── Badges ─── */
+        .badge { font-weight: 500; letter-spacing: 0.2px; padding: 0.3em 0.65em; }
+
+        /* ─── Typography ─── */
+        h2 { font-weight: 700; font-size: 1.25rem; color: var(--text-primary); letter-spacing: -0.01em; }
+        h5 { font-weight: 600; font-size: 0.9375rem; }
+        .text-muted { color: var(--text-secondary) !important; }
+
+        /* ─── Modals ─── */
+        .modal-content { border: none; border-radius: var(--radius-lg); box-shadow: 0 20px 60px rgba(0,0,0,0.15); }
+        .modal-header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border-light); }
+        .modal-body { padding: 1.25rem; }
+        .modal-footer { padding: 0.875rem 1.25rem; border-top: 1px solid var(--border-light); }
+
+        /* ─── Scrollbar ─── */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .sidebar ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); }
+        .sidebar ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+        /* ─── Utils ─── */
+        ::selection { background: rgba(99,102,241,0.15); }
+        :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+        /* ─── Global loading overlay ───
+           Shown for any action with real wait time that isn't already
+           covered by an inline button spinner (e.g. full-page navigations
+           to a slow route, or client-side fetches on list/detail pages). */
+        .mhes-loading-overlay {
+            position: fixed; inset: 0; z-index: 2000;
+            display: none;
+            align-items: center; justify-content: center;
+            flex-direction: column; gap: 0.875rem;
+            background: rgba(248,250,252,0.85);
+            backdrop-filter: blur(1.5px);
+        }
+        .mhes-loading-overlay.show { display: flex; }
+        .mhes-loading-spinner {
+            width: 38px; height: 38px;
+            border: 3.5px solid rgba(99,102,241,0.18);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: mhesSpin 700ms linear infinite;
+        }
+        @keyframes mhesSpin { to { transform: rotate(360deg); } }
+        .mhes-loading-text {
+            font-size: 0.8125rem; font-weight: 500; color: var(--text-secondary);
+            letter-spacing: 0.1px;
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <div class="app-wrapper">
+        <!-- Sidebar -->
+        <nav class="sidebar" id="sidebar">
+            <a href="/" class="sidebar-brand">
+                <div class="brand-icon">
+                    <i class="bi bi-clock-history"></i>
+                </div>
+                <div class="brand-text-wrap">
+                    <span class="brand-name">MHES</span>
+                    <span class="brand-sub">Estimation System</span>
+                </div>
+            </a>
+            <div class="sidebar-nav-scroll">
+                <!-- <div class="sidebar-section-label">Navigation</div> -->
+                <ul class="sidebar-nav">
+                    <li>
+                        <a href="/" id="navAiChatbot" class="{% if request.path == '/' %}active{% endif %}" title="AI Chatbot">
+                            <i class="bi bi-chat-dots"></i>
+                            <span class="nav-label">AI Chatbot</span>
+                        </a>
+                    </li>
+                     <li>
+                        <a href="/preview" class="{% if request.path == '/preview' %}active{% endif %}" title="Preview">
+                            <i class="bi bi-eye"></i>
+                            <span class="nav-label">Preview</span>
+                        </a>
+                    </li>
+                </ul>
+
+                <div class="sidebar-section-label">History Management</div>
+                <ul class="sidebar-nav">
+                    <li>
+                        <a href="/preview/temp" id="navTempData" class="{% if request.path.startswith('/preview/temp') %}active{% endif %}" title="Temporary Data">
+                            <i class="bi bi-archive"></i>
+                            <span class="nav-label">Temporary Data List</span>
+                            <span class="nav-badge badge rounded-pill bg-warning text-dark d-none" id="tempDataBadge" title="Temporary data stashed">1</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/export/files" class="{% if request.path == '/export/files' %}active{% endif %}" title="Exported Files">
+                            <i class="bi bi-file-earmark-excel"></i>
+                            <span class="nav-label">Exported File List</span>
+                        </a>
+                    </li>
+                </ul>
+
+                <div class="sidebar-section-label">Knowledge Base</div>
+                <ul class="sidebar-nav">
+                    <li>
+                        <a href="/upload" class="{% if request.path.startswith('/upload') %}active{% endif %}" title="Upload Files">
+                            <i class="bi bi-cloud-upload"></i>
+                            <span class="nav-label">Upload Files</span>
+                            {% if missing_embeddings_count is defined and missing_embeddings_count > 0 %}
+                            <span class="nav-badge badge rounded-pill bg-warning text-dark" title="{{ missing_embeddings_count }} file(s) missing embeddings">
+                                {{ missing_embeddings_count }}
+                            </span>
+                            {% endif %}
+                        </a>
+                    </li>
+                </ul>
+
+                {% if current_user and current_user.role == "Admin" %}
+                <div class="sidebar-section-label">Administration</div>
+                <ul class="sidebar-nav">
+                    <li>
+                        <a href="/admin/users" class="{% if request.path == '/admin/users' %}active{% endif %}" title="Manage Users">
+                            <i class="bi bi-people"></i>
+                            <span class="nav-label">Manage Users</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/admin/teams" class="{% if request.path == '/admin/teams' %}active{% endif %}" title="Manage Teams">
+                            <i class="bi bi-diagram-3"></i>
+                            <span class="nav-label">Manage Teams</span>
+                        </a>
+                    </li>
+                </ul>
+                {% endif %}
+
+                <div class="sidebar-section-label">Account</div>
+                <ul class="sidebar-nav">
+                    {% if current_user %}
+                    <li>
+                        <div class="sidebar-account-info" title="{{ current_user.username }} &middot; {{ current_user.role }}">
+                            {{ current_user.username }} &middot; {{ current_user.role }}
+                        </div>
+                    </li>
+                    <li>
+                        <form method="POST" action="{{ url_for('auth.logout') }}">
+                            <button type="submit" class="nav-btn" title="Logout">
+                                <i class="bi bi-box-arrow-right"></i>
+                                <span class="nav-label">Logout</span>
+                            </button>
+                        </form>
+                    </li>
+                    {% else %}
+                    <li>
+                        <a href="{{ url_for('auth.login_page') }}" title="Login">
+                            <i class="bi bi-box-arrow-in-right"></i>
+                            <span class="nav-label">Login</span>
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </div>
+            <button class="sidebar-toggle" id="sidebarToggle" title="Collapse sidebar">
+                <i class="bi bi-chevron-left"></i>
+                <span class="toggle-label">Collapse</span>
+            </button>
+        </nav>
+
+        <!-- Main -->
+        <main class="app-main">
+            <div class="{% block main_class %}container-fluid p-4{% endblock %}">
+                {% if error %}
+                <div class="alert alert-danger" role="alert">{{ error }}</div>
+                {% endif %}
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+                {% endfor %}
+                {% endif %}
+                {% endwith %}
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+    </div>
+
+    <!-- Global loading overlay: MHES.showLoading("message") / MHES.hideLoading() -->
+    <div class="mhes-loading-overlay" id="mhesLoadingOverlay" aria-live="polite" aria-busy="true">
+        <div class="mhes-loading-spinner"></div>
+        <div class="mhes-loading-text" id="mhesLoadingText">Loading...</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+    window.MHES = window.MHES || {};
+    (function() {
+        var overlay = document.getElementById('mhesLoadingOverlay');
+        var overlayText = document.getElementById('mhesLoadingText');
+        var hideTimer = null;
+
+        // Shown for full-page navigations and fetches that have no other
+        // loading feedback. Auto-hides after `autoHideMs` (default 8s) as a
+        // safety net for actions that never unload the page (e.g. a file
+        // download link, where the browser doesn't navigate away).
+        window.MHES.showLoading = function(message, autoHideMs) {
+            overlayText.textContent = message || 'Loading...';
+            overlay.classList.add('show');
+            if (hideTimer) clearTimeout(hideTimer);
+            hideTimer = setTimeout(window.MHES.hideLoading, autoHideMs || 8000);
+        };
+        window.MHES.hideLoading = function() {
+            overlay.classList.remove('show');
+            if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        };
+        // If a page is restored from the back/forward cache (bfcache) with
+        // the overlay still shown from a prior click, clear it.
+        window.addEventListener('pageshow', function() { window.MHES.hideLoading(); });
+    })();
+    </script>
+    <script>
+    (function() {
+        var sidebar = document.getElementById('sidebar');
+        var toggle = document.getElementById('sidebarToggle');
+        var storageKey = 'mhes_sidebar_collapsed';
+        if (localStorage.getItem(storageKey) === '1') sidebar.classList.add('collapsed');
+        toggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            localStorage.setItem(storageKey, sidebar.classList.contains('collapsed') ? '1' : '0');
+        });
+
+        // Mark same-tab in-app link clicks so pages with an unload safety
+        // net (e.g. Preview) can tell "navigating to another page in the
+        // app" apart from "actually closing/leaving" and skip creating a
+        // redundant stash in the former case.
+        document.addEventListener('click', function(e) {
+            var a = e.target.closest('a[href]');
+            if (!a) return;
+            if (a.target === '_blank' || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            var href = a.getAttribute('href') || '';
+            if (href.charAt(0) !== '/' && href.indexOf(window.location.origin) !== 0) return;
+            sessionStorage.setItem('mhes_internal_nav', '1');
+        }, true);
+
+        // Show a badge on "Temporary Data" with the number of stashes.
+        // Stashes are stored server-side (temp_data/stashes.json), shared
+        // by everyone using the app, so they survive closing the browser.
+        var tempDataBadge = document.getElementById('tempDataBadge');
+        function updateTempDataBadge() {
+            if (!tempDataBadge) return;
+            fetch('/preview/temp/stashes')
+                .then(function(r) { return r.json(); })
+                .then(function(list) {
+                    tempDataBadge.textContent = list.length;
+                    tempDataBadge.classList.toggle('d-none', list.length === 0);
+                })
+                .catch(function() {});
+        }
+        // Skip the fetch entirely when logged out — /preview/temp/stashes
+        // now requires login (Phase 3), and calling it anonymously would
+        // just render its JSON error body into the badge.
+        if ({{ 'true' if current_user else 'false' }}) {
+            updateTempDataBadge();
+        }
+
+        // The "start fresh vs. resume" decision (stashing pending Preview
+        // data, clearing chat history) happens on the Chatbot page itself
+        // on load — see templates/chatbot.html — since that's the only
+        // place that can tell whether the visit came via "Add More / Back
+        // to Chatbot" (marked with ?resume=1) or any other route (sidebar
+        // link, brand logo, typed URL, back button, bookmark, refresh).
+    })();
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

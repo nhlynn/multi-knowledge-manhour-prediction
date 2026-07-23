@@ -1,0 +1,74 @@
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ── Virtual environment ──
+venv/
+.venv/
+
+# ── Environment / secrets ──
+.env
+.env.local
+.env.*.local
+
+# ── GCP service account keys (never commit credentials) ──
+credentials/
+*-user.json
+*-key.json
+*serviceaccount*.json
+ai-team-*.json
+
+# ── Runtime data (keep dirs via .gitkeep, ignore contents) ──
+kb_knowledge/*
+!kb_knowledge/.gitkeep
+embeddings/*
+!embeddings/.gitkeep
+uploads/*
+!uploads/.gitkeep
+exports/*
+!exports/.gitkeep
+logs/*
+!logs/.gitkeep
+models/*
+!models/.gitkeep
+temp_data/*
+!temp_data/.gitkeep
+storage/teams/*
+!storage/teams/.gitkeep
+
+# ── Source data ──
+simple_resource/
+
+# ── Flask instance ──
+instance/
+
+# ── Database (runtime — SQLite file + WAL/SHM journals) ──
+database/*.db
+database/*.db-shm
+database/*.db-wal
+database/*.db-journal
+
+# ── IDE ──
+.vscode/
+.idea/
+*.sublime-*
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Test/lint caches ──
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# ── Generic safety nets (in addition to the folder-scoped rules above) ──
+*.log
+*.bak
+*.tmp
