@@ -633,8 +633,8 @@ Chatbot/Preview/Export require any logged-in role; `/admin/*` requires
 **Purpose:** Per-team Excel column-role mapping (Phase 7 of multi-team
 support — see `docs/ARCHITECTURE.md` §5g), so different teams can label
 the same underlying data with completely different headers (e.g.
-Development Team's `Feature`/`Technology`/`Hours`) without a separate
-parser per team. Managed entirely by
+Development/Bamawl Team's `Feature`/`Technology`/`Hours`) without a
+separate parser per team. Managed entirely by
 `repositories/team_import_config_repository.py`
 (`TeamImportConfigRepository`, raw SQL only, mirroring
 `repositories/team_repository.py`).
@@ -645,8 +645,41 @@ parser per team. Managed entirely by
 |---|---|---|
 | `id` | INTEGER (primary key, autoincrement) | Row id |
 | `team_id` | INTEGER (not null, unique) | The team this mapping belongs to — at most one config per team |
-| `column_mapping` | TEXT (JSON, not null) | Dict of MHES role -> that team's actual Excel header name, e.g. `{"category": "Technology", "task": "Feature", "detail": "Feature", "estimate": "Hours"}`. Roles omitted here fall back to generic keyword detection (see `docs/ARCHITECTURE.md` §5g) |
+| `column_mapping` | TEXT (JSON, not null) | One of two shapes — see below. Roles/keys the config omits fall back to generic keyword detection where applicable (see `docs/ARCHITECTURE.md` §5g) |
 | `created_at` | TEXT (ISO datetime) | Row creation timestamp |
+
+`column_mapping` holds one of two JSON shapes (the same column, just a
+richer schema added later — no migration needed, since it was always an
+opaque JSON blob to this table):
+
+1. **Flat mode** (Phase 7) — one Activity per row:
+   ```json
+   {"category": "Technology", "task": "Feature", "detail": "Feature", "estimate": "Hours"}
+   ```
+   Dict of MHES role -> that team's actual Excel header name.
+
+2. **Phases mode** (added later — see `docs/ARCHITECTURE.md` §5i) —
+   *many* Activities per row, one per phase column, so a row's full
+   phase-by-phase hour breakdown (Development, Code Review, QA, ...) is
+   preserved instead of collapsed into a single total:
+   ```json
+   {
+     "sheet": "ALL_Detail",
+     "header_row": 4,
+     "task_column": "Function",
+     "category": "Bamawl ERP",
+     "phase_columns": [
+       {"label": "Development", "column": "Development man-hours (h)"},
+       {"label": "Code Review", "column": "Code review (h)"}
+     ],
+     "total_column": "Total(h)"
+   }
+   ```
+   `sheet`/`header_row` also fix a real-world problem flat-mode files
+   didn't have: some teams' actual workbooks have their header row
+   several rows down (a percentage/phase-group block sits above it),
+   which `excel_parser`'s default row-1-header assumption can't handle
+   without this override.
 
 Indexed on `team_id` (`idx_team_import_configs_team_id`).
 
@@ -670,11 +703,19 @@ a team's Excel files, never their content.
 - **Read** by `routes/upload.py::_team_column_mapping()` (looked up by
   `session["team_id"]`) before every call to
   `EmbeddingService.process_excel_file`, which passes it straight
-  through to `excel_parser.excel_to_nested_json` / `_map_columns`. A team
-  with no row here (`get_by_team_id` returns `None`) parses using only
-  the original generic keyword matching — byte-identical to every KB
-  file parsed before Phase 7.
+  through to `excel_parser.excel_to_nested_json`. That function inspects
+  the config to decide which mode applies: a `phase_columns` key routes
+  it to `_process_phases_sheet` (phases mode); otherwise it goes through
+  `_map_columns` (flat mode). A team with no row here (`get_by_team_id`
+  returns `None`) parses using only the original generic keyword
+  matching — byte-identical to every KB file parsed before Phase 7.
 - **No delete operation exists yet.**
+- **Not yet seeded for phases mode**: as of this writing, only the flat
+  demo mapping (`seed_development_team_import_config`) has a seed
+  migration; Bamawl/KiKan/SGL's real phases-mode configs (matching their
+  actual `simple_resource/*_import_export_format.xlsx` files) are set up
+  directly via `TeamImportConfigRepository.upsert()`, not a tracked
+  migration.
 
 ---
 

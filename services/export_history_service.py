@@ -94,7 +94,7 @@ class ExportHistoryService:
         only applies to brand new databases, so an existing table needs an
         explicit ALTER. Existing rows (which predate any team concept) are
         then backfilled onto the default team
-        (``utils.migration.DEFAULT_TEAM_SLUG``). Safe to run on every
+        (``utils.migrations.DEFAULT_TEAM_SLUG``). Safe to run on every
         service construction: the ALTERs are no-ops once the columns
         exist, and the backfill only ever touches rows still missing a
         ``team_id``.
@@ -122,7 +122,7 @@ class ExportHistoryService:
             return
 
         from repositories.team_repository import TeamRepository
-        from utils.migration import DEFAULT_TEAM_SLUG
+        from utils.migrations import DEFAULT_TEAM_SLUG
 
         team = TeamRepository(self.db_path).get_by_slug(DEFAULT_TEAM_SLUG)
         if team is None:
@@ -211,6 +211,61 @@ class ExportHistoryService:
         )
         return record
 
+    def record_export_result(
+        self,
+        *,
+        categories: list[dict[str, Any]],
+        file_name: str,
+        file_url: str,
+        file_path: str,
+        file_size: int,
+        project_name: str,
+        created_by: str,
+        team_id: int,
+        created_by_user_id: int | None,
+    ) -> None:
+        """Compute totals from the exported categories and save a history row.
+
+        Best-effort: by the time this is called, the Excel file has
+        already been uploaded successfully, so a failure here is only
+        logged — it must never remove the uploaded file or fail the
+        export response (see ``routes/export.py::export_excel``).
+
+        Args:
+            categories: The same Category → Task → Activity structure
+                that was exported, used only to compute ``total_tasks``/
+                ``total_hours`` for the history record.
+            file_url: Download URL for the file (built by the caller via
+                ``url_for``, since generating one requires an active
+                Flask request/routing context this service doesn't have).
+            Other args: see ``insert_history``.
+        """
+        try:
+            total_tasks = sum(len(cat.get("tasks") or []) for cat in categories)
+            total_hours = sum(
+                (task.get("total_hours") or 0)
+                for cat in categories
+                for task in (cat.get("tasks") or [])
+            )
+            self.insert_history(
+                project_name=project_name,
+                created_by=created_by,
+                created_by_user_id=created_by_user_id,
+                team_id=team_id,
+                export_date=datetime.now().isoformat(),
+                file_name=file_name,
+                file_url=file_url,
+                file_path=file_path,
+                file_size=file_size,
+                total_tasks=total_tasks,
+                total_hours=total_hours,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to save export history for file=%s; the Excel file was still uploaded to GCS.",
+                file_name,
+            )
+
     def get_history(self, *, team_id: int | None = None) -> list[dict[str, Any]]:
         """Return all export history records, newest first.
 
@@ -231,6 +286,19 @@ class ExportHistoryService:
                 (team_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def has_records_for_team(self, team_id: int) -> bool:
+        """Return whether any export history record belongs to this team.
+
+        Used by ``services.team_service.get_team_deletion_blockers`` to
+        decide whether a team is safe to delete — an ``EXISTS`` query
+        rather than ``len(get_history(...))`` so it doesn't need to
+        materialize every row just to answer a yes/no question.
+        """
+        row = self._conn().execute(
+            "SELECT EXISTS(SELECT 1 FROM export_history WHERE team_id = ?) AS found", (team_id,),
+        ).fetchone()
+        return bool(row["found"])
 
     def get_history_page(
         self,

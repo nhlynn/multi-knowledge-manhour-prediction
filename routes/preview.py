@@ -7,6 +7,7 @@ from flask import Blueprint, current_app, flash, jsonify, redirect, render_templ
 
 from scheduler.temp_data_service import TempDataService
 from services.remark_html import sanitize_remark_html
+from utils.pagination import parse_page_param, total_pages_for
 from utils.permissions import require_login
 
 preview_bp = Blueprint("preview", __name__)
@@ -72,11 +73,7 @@ def list_stashes_page():
     from_date = (request.args.get("from_date") or "").strip()
     to_date = (request.args.get("to_date") or "").strip()
     project_name = (request.args.get("project_name") or "").strip()
-    try:
-        page = int(request.args.get("page", 1))
-    except ValueError:
-        page = 1
-    page = max(page, 1)
+    page = parse_page_param(request.args.get("page"))
 
     service = _temp_data_service()
     items, total = service.list_stashes_page(
@@ -86,7 +83,7 @@ def list_stashes_page():
         to_date=to_date or None,
         project_name=project_name or None,
     )
-    total_pages = max((total + TEMP_STASHES_PER_PAGE - 1) // TEMP_STASHES_PER_PAGE, 1)
+    total_pages = total_pages_for(total, TEMP_STASHES_PER_PAGE)
     if page > total_pages:
         page = total_pages
         items, total = service.list_stashes_page(
@@ -125,7 +122,7 @@ def create_stash():
     data = request.get_json(silent=True) or {}
     categories = data.get("categories") or []
 
-    if not categories:
+    if not isinstance(categories, list) or not categories:
         return jsonify({"error": "No categories to stash."}), 400
 
     stash = _temp_data_service().add_stash(

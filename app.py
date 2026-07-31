@@ -7,10 +7,10 @@ import os
 import logging
 from flask import Flask, render_template, session
 
-from config import Config, config_by_name
+from config import Config, INSECURE_DEFAULT_SECRET_KEY, config_by_name
 from scheduler.scheduler import init_scheduler
 from utils.logger import setup_logging
-from utils.migration import (
+from utils.migrations import (
     create_default_admin_user,
     create_default_team,
     merge_legacy_databases_into_mhes,
@@ -35,6 +35,14 @@ def create_app(config_name: str = "development") -> Flask:
     app = Flask(__name__)
     app.config.from_object(config_by_name.get(config_name, Config))
 
+    if config_name == "production" and app.config["SECRET_KEY"] == INSECURE_DEFAULT_SECRET_KEY:
+        raise RuntimeError(
+            "Refusing to start with config_name='production' while SECRET_KEY is still "
+            "the insecure development default. Set a real SECRET_KEY in your environment/.env "
+            "before running in production — session cookies are signed with this key, so a "
+            "known value lets an attacker forge a valid session for any user."
+        )
+
     # Ensure required folders exist
     _ensure_folders(app)
 
@@ -42,7 +50,7 @@ def create_app(config_name: str = "development") -> Flask:
     setup_logging(app.config.get("LOG_FOLDER", "logs"))
 
     # One-shot migrations into the single shared database/mhes.db.
-    # All no-op on every startup after the first (see utils/migration.py).
+    # All no-op on every startup after the first (see utils/migrations/).
     #
     # create_default_team runs first (moved ahead of the legacy-database
     # merge in Phase 6): merge_legacy_databases_into_mhes's export_history
@@ -77,6 +85,26 @@ def create_app(config_name: str = "development") -> Flask:
 
     # Register blueprints
     _register_blueprints(app)
+
+    # Session-status guard (see utils/auth.py): if a logged-in session's
+    # account has been deactivated (or deleted) since the session
+    # started, invalidate it on this very next request. Registered
+    # before CSRF/permission hooks so a deactivated account is caught
+    # before anything else runs.
+    from utils.auth import check_account_still_active
+
+    app.before_request(check_account_still_active)
+
+    # CSRF protection (see utils/csrf.py) — applies to every route in
+    # every blueprint, checked before any blueprint-specific
+    # before_request hook (utils/permissions.py) runs.
+    from utils.csrf import get_csrf_token, validate_csrf_request
+
+    app.before_request(validate_csrf_request)
+
+    @app.context_processor
+    def inject_csrf_token() -> dict:
+        return {"csrf_token": get_csrf_token}
 
     # Register error handlers
     _register_error_handlers(app)
@@ -212,13 +240,13 @@ def _register_error_handlers(app: Flask) -> None:
     @app.errorhandler(404)
     def not_found(error: Exception) -> tuple[str, int]:
         """Handle 404 errors."""
-        app.logger.warning(f"Page not found: {error}")
+        app.logger.warning("Page not found: %s", error)
         return render_template("base.html", error="Page not found"), 404
 
     @app.errorhandler(500)
     def internal_error(error: Exception) -> tuple[str, int]:
         """Handle 500 errors."""
-        app.logger.error(f"Internal server error: {error}")
+        app.logger.error("Internal server error: %s", error)
         return render_template("base.html", error="Internal server error"), 500
 
 

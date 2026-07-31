@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Create Team{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Create Team</h2>
+    <a href="{{ url_for('admin.list_teams') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Back to Teams
+    </a>
+</div>
+
+<div class="card" style="max-width: 640px;">
+    <div class="card-body">
+        {% if errors %}
+        <div class="alert alert-danger" role="alert">
+            <strong><i class="bi bi-exclamation-circle me-1"></i>Please fix the following:</strong>
+            <ul class="mb-0 mt-1 ps-3">
+                {% for field, message in errors.items() %}
+                <li>{{ message }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        <form method="post" id="createTeamForm" novalidate>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="mb-3">
+                <label class="form-label" for="teamName">Team Name <span class="text-danger">*</span></label>
+                <input type="text" id="teamName" name="name" class="form-control {{ 'is-invalid' if errors.name }}"
+                       value="{{ name }}" maxlength="100" required>
+                {% if errors.name %}<div class="invalid-feedback">{{ errors.name }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="teamSlug">Team Code <span class="text-danger">*</span></label>
+                <input type="text" id="teamSlug" name="slug" class="form-control {{ 'is-invalid' if errors.slug }}"
+                       value="{{ slug }}" maxlength="60" required>
+                <div class="form-text">
+                    Auto-generated from Team Name — edit if you'd like a different code. Lowercase
+                    letters, numbers, and hyphens only (e.g. "infrastructure-team").
+                </div>
+                {% if errors.slug %}<div class="invalid-feedback">{{ errors.slug }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="teamDescription">Description</label>
+                <textarea id="teamDescription" name="description" class="form-control {{ 'is-invalid' if errors.description }}"
+                          rows="3" maxlength="500">{{ description }}</textarea>
+                <div class="form-text d-flex justify-content-between">
+                    <span>Optional.</span>
+                    <span id="teamDescriptionCount"></span>
+                </div>
+                {% if errors.description %}<div class="invalid-feedback">{{ errors.description }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="teamStatus">Status <span class="text-danger">*</span></label>
+                <select id="teamStatus" name="status" class="form-select {{ 'is-invalid' if errors.status }}">
+                    {% for s in statuses %}
+                    <option value="{{ s }}" {{ 'selected' if status == s else '' }}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+                {% if errors.status %}<div class="invalid-feedback">{{ errors.status }}</div>{% endif %}
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary" id="createTeamSubmit">
+                    <i class="bi bi-check-lg me-1"></i>Create Team
+                </button>
+                <a href="{{ url_for('admin.list_teams') }}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    var nameInput = document.getElementById('teamName');
+    var slugInput = document.getElementById('teamSlug');
+    // Once the admin edits the Team Code by hand, stop overwriting it as
+    // they keep typing the name — auto-generation is only a starting
+    // point, never something that fights an intentional edit.
+    var slugManuallyEdited = slugInput.value.trim().length > 0;
+
+    function slugify(value) {
+        return (value || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 60)
+            .replace(/-+$/, '');
+    }
+
+    nameInput.addEventListener('input', function() {
+        if (!slugManuallyEdited) {
+            slugInput.value = slugify(nameInput.value);
+        }
+    });
+
+    slugInput.addEventListener('input', function() {
+        slugManuallyEdited = slugInput.value.trim().length > 0;
+    });
+
+    var descriptionInput = document.getElementById('teamDescription');
+    var descriptionCount = document.getElementById('teamDescriptionCount');
+    function updateDescriptionCount() {
+        descriptionCount.textContent = descriptionInput.value.length + ' / 500';
+    }
+    descriptionInput.addEventListener('input', updateDescriptionCount);
+    updateDescriptionCount();
+
+    document.getElementById('createTeamForm').addEventListener('submit', function() {
+        window.MHES.showLoading('Creating team...');
+        var btn = document.getElementById('createTeamSubmit');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creating...';
+    });
+})();
+</script>
+{% endblock %}

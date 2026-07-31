@@ -12,11 +12,18 @@ load_dotenv()
 
 BASE_DIR: str = os.path.abspath(os.path.dirname(__file__))
 
+# Referenced by app.py to refuse to start a production instance still
+# running with this placeholder — fine for local development (where a
+# stable, guessable key doesn't matter), never acceptable in production
+# (session cookies are signed with it; a known key lets an attacker
+# forge a valid, arbitrary session).
+INSECURE_DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
+
 
 class Config:
     """Base configuration."""
 
-    SECRET_KEY: str = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
+    SECRET_KEY: str = os.environ.get("SECRET_KEY", INSECURE_DEFAULT_SECRET_KEY)
     DEBUG: bool = False
     TESTING: bool = False
 
@@ -24,6 +31,11 @@ class Config:
     # for both flash messages and, as of Phase 2, login sessions)
     SESSION_COOKIE_HTTPONLY: bool = True
     SESSION_COOKIE_SAMESITE: str = "Lax"
+    # False here (Flask's own default) so local development/testing over
+    # plain http:// keeps working unchanged — ProductionConfig below
+    # overrides this to True, since a production deployment should only
+    # ever be served over https:// anyway.
+    SESSION_COOKIE_SECURE: bool = False
 
     # Folder paths
     UPLOAD_FOLDER: str = os.path.join(BASE_DIR, "uploads")
@@ -38,7 +50,7 @@ class Config:
     # — each team's data now lives under storage/teams/<team_slug>/{knowledge,embeddings}
     # (see utils/team_storage.py). The pre-Phase-4 kb_knowledge/ and
     # embeddings/ folders are migrated into the default team's tree on
-    # startup (utils/migration.py::migrate_kb_to_team_storage).
+    # startup (utils/migrations/kb_storage.py::migrate_kb_to_team_storage).
     STORAGE_FOLDER: str = os.path.join(BASE_DIR, "storage")
     TEAMS_FOLDER: str = os.path.join(STORAGE_FOLDER, "teams")
 
@@ -58,6 +70,29 @@ class Config:
     # through this config object.
     GCP_PROJECT_ID: str | None = os.environ.get("GCP_PROJECT_ID") or None
     GCP_BUCKET_NAME: str | None = os.environ.get("GCP_BUCKET_NAME") or None
+
+    # Outbound email (Forgot Password reset links — see services/email_service.py).
+    # SMTP_HOST left unset means "no email configured": the app still
+    # starts and Forgot Password's enumeration-safe behavior still works,
+    # it just logs and skips actually sending anything.
+    SMTP_HOST: str | None = os.environ.get("SMTP_HOST") or None
+    SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
+    SMTP_USERNAME: str | None = os.environ.get("SMTP_USERNAME") or None
+    SMTP_PASSWORD: str | None = os.environ.get("SMTP_PASSWORD") or None
+    SMTP_USE_TLS: bool = os.environ.get("SMTP_USE_TLS", "true").strip().lower() != "false"
+    # True (default) = "opportunistic"/explicit TLS: connect in plaintext,
+    # then upgrade via STARTTLS (the usual pattern for port 587/25).
+    # False = implicit TLS: the connection is encrypted from the very
+    # first byte via SMTP_SSL, never STARTTLS (the usual pattern for
+    # port 465 — e.g. this project's own mail01.brycenmyanmar.com.mm).
+    # Only meaningful when SMTP_USE_TLS is true.
+    SMTP_OPPORTUNISTIC_TLS: bool = (
+        os.environ.get("SMTP_OPPORTUNISTIC_TLS", "true").strip().lower() != "false"
+    )
+    MAIL_FROM_ADDRESS: str = os.environ.get("MAIL_FROM_ADDRESS", "no-reply@mhes.local")
+    PASSWORD_RESET_TOKEN_TTL_MINUTES: int = int(
+        os.environ.get("PASSWORD_RESET_TOKEN_TTL_MINUTES", "30")
+    )
 
     # Temp data cleanup (APScheduler)
     TEMP_DATA_RETENTION_DAYS: int = int(os.environ.get("TEMP_DATA_RETENTION_DAYS", "7"))
@@ -79,6 +114,8 @@ class ProductionConfig(Config):
     """Production configuration."""
 
     DEBUG: bool = False
+    # Only send the session cookie over HTTPS in production.
+    SESSION_COOKIE_SECURE: bool = True
 
 
 class TestingConfig(Config):

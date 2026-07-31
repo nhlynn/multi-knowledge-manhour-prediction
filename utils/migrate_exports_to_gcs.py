@@ -8,7 +8,7 @@ to the configured GCS bucket, and repoints its export_history.file_path
 at the new GCS object path — the same convention new exports already use
 (mhes/bcmm/1001/<file_name>).
 
-Unlike the automatic migrations in utils/migration.py (which run on every
+Unlike the automatic migrations in utils/migrations/ (which run on every
 app startup and are safe no-ops), this is deliberately NOT run
 automatically: it needs real GCP credentials configured (GCP_BUCKET_NAME,
 GOOGLE_APPLICATION_CREDENTIALS — see .env.example), and moving/uploading

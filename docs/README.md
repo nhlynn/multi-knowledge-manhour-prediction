@@ -1,7 +1,8 @@
 # MHES — Man-Hour Estimation System
 
-> An AI-powered web application that converts infrastructure man-hour knowledge bases into
-> searchable, editable, and exportable project estimates.
+> A multi-team, AI-powered web application that converts each team's man-hour knowledge base into
+> searchable, editable, and exportable project estimates — with login, role-based permissions, and
+> per-team Knowledge Base isolation.
 
 ---
 
@@ -21,11 +22,17 @@
 
 ## System Purpose
 
-MHES is an internal tool designed to eliminate manual man-hour estimation for infrastructure
-projects. Engineers upload historical Excel estimation sheets into a knowledge base. The system
-automatically indexes the data using AI embeddings, allowing users to query it conversationally,
-assemble custom estimates from search results, edit them inline, and export a formatted Excel
-report — all without touching a spreadsheet manually.
+MHES is an internal tool designed to eliminate manual man-hour estimation for
+development projects. Engineers upload historical Excel estimation sheets into their own team's
+knowledge base. The system automatically indexes the data using AI embeddings, allowing users to
+query it conversationally (within their own team's data only), assemble custom estimates from
+search results, edit them inline, and export a formatted Excel report — all without touching a
+spreadsheet manually.
+
+Multiple teams can use the same MHES installation side by side. Every user belongs to exactly one
+team and has one of three roles (Admin, Team Manager, Member); each team's Knowledge Base,
+embeddings, Excel import column mapping, and Excel export template are all completely isolated
+from every other team's.
 
 ---
 
@@ -34,28 +41,37 @@ report — all without touching a spreadsheet manually.
 | Objective | Description |
 |---|---|
 | **Reduce estimation time** | Cut the time required to produce a man-hour estimate from hours to minutes |
-| **Standardize estimates** | Ensure all estimates derive from a single, version-controlled knowledge base |
+| **Standardize estimates** | Ensure all estimates derive from a single, version-controlled knowledge base — per team |
 | **Enable reuse** | Allow historical project data to inform new estimates via semantic search |
 | **Reduce errors** | Eliminate manual copy-paste between Excel files |
-| **Improve traceability** | Every estimate can be traced back to its source knowledge file |
+| **Improve traceability** | Every estimate can be traced back to its source knowledge file, team, and (where known) the user who created it |
+| **Support multiple teams safely** | Let unrelated teams share one MHES installation without ever seeing each other's Knowledge Base or Export History |
 
 ---
 
 ## Main Features
 
-### Knowledge Base Management
-Upload one or more Excel files (`.xlsx`) containing historical man-hour data. The system
-automatically validates, stores, and indexes them. Duplicate files can be renamed or overwritten.
-Files can be deleted or re-indexed at any time.
+### Authentication & Role-Based Access
+Every screen except Login requires a session. Three roles: **Admin** (everything, plus manage
+users/teams and see every team's Export History), **Team Manager** (chatbot/Preview/Export, plus
+manage their own team's Knowledge Base), **Member** (chatbot/Preview/Export only).
+
+### Team-Isolated Knowledge Base Management
+Upload one or more Excel files (`.xlsx`) containing historical man-hour data — stored under the
+uploading user's own team's folder only. The system automatically validates, stores, and indexes
+them. Duplicate files can be renamed or overwritten. Files can be deleted or re-indexed at any
+time. A team can optionally configure its own Excel column mapping (different header names, a
+specific sheet/header row, or a full phase-by-phase breakdown — see Technology Stack below) instead
+of MHES's generic column detection.
 
 ### AI Semantic Search (Chatbot)
-A chat-style interface where users describe what they need in plain language. The system
-searches the knowledge base using a two-phase strategy: exact/partial name matching first
-(including word-level matches, e.g. "wordpress documentation" correctly scopes to the
-"Wordpress" category), then semantic vector search as a fallback, scoped to a single source
+A chat-style interface where users describe what they need in plain language, searching only their
+own team's Knowledge Base. The system searches using a two-phase strategy: exact/partial name
+matching first (including word-level matches, e.g. "wordpress documentation" correctly scopes to
+the "Wordpress" category), then semantic vector search as a fallback, scoped to a single source
 file to avoid mixing results from unrelated knowledge files. Results are grouped into a
-Category → Task → Activity hierarchy. The conversation is remembered across a session and
-resumes when returning from Preview, but starts fresh from any other entry point.
+Category → Task → Activity hierarchy. The conversation is remembered across a session and resumes
+when returning from Preview, but starts fresh from any other entry point.
 
 ### Interactive Preview
 Search results are assembled on a Preview screen showing the full estimation hierarchy.
@@ -64,29 +80,32 @@ inline directly in the browser. Changes recalculate totals in real time.
 
 ### Excel Export
 Generates a professionally formatted `.xlsx` file with merged category cells, numbered task
-rows, working-day formulas (`=hours/8`), and a styled totals row matching the standard
-infrastructure estimation template. If the exported project contains any Category, Task, or
-Activity Detail not already in the knowledge base, that data is automatically written into the
-knowledge base and embedded — so a curated estimate can grow the knowledge base without a
-separate manual upload step.
+rows, working-day formulas (`=hours/8`), and a styled totals row. A team can configure its own
+export column layout (which columns appear, their labels, order, and width) instead of MHES's
+default 5-column layout. Exporting never modifies the Knowledge Base — it only produces the
+downloadable file and a record in that team's Export History.
+
+### Export History
+Every export is recorded with the team and (where known) the actual user who created it. Team
+Managers and Members see only their own team's Export History; Admins see every team's.
 
 ### Temporary Data (Preview Stashing)
 In-progress Preview data is automatically backed up to the server whenever the user starts a
 new chatbot session or closes/refreshes the browser with unsaved changes. Backups ("stashes")
 can be reviewed, restored back into Preview, or discarded from a dedicated Temporary Data page,
 and are purged automatically once older than a configurable retention period (default 7 days)
-via a scheduled background job.
+via a scheduled background job. Unlike the Knowledge Base and Export History, this store is not
+yet scoped per team — a known limitation (see Future Improvements).
 
 ---
 
 ## Target Users
 
-| Role | How they use MHES |
-|---|---|
-| **Infrastructure Engineers** | Search for tasks, assemble estimates, export to Excel |
-| **Project Managers** | Review estimates, adjust buffers, export reports |
-| **System Administrators** | Upload KB files, manage embeddings, monitor logs |
-| **Technical Leads** | Validate estimates against historical data |
+| Role in MHES | Typical job title | How they use MHES |
+|---|---|---|
+| **Admin** | System Administrator | Manages users/teams, uploads/manages KB files, sees every team's Export History |
+| **Team Manager** | Technical Lead, Infrastructure Engineer | Manages their team's Knowledge Base, searches, assembles estimates, exports |
+| **Member** | Project Manager, Engineer | Searches, assembles estimates, adjusts buffers, exports reports |
 
 ---
 
@@ -94,9 +113,11 @@ via a scheduled background job.
 
 - **No spreadsheet skill required**: the chat interface handles search and assembly
 - **Self-correcting estimates**: buffer logic adjusts automatically based on partial vs. full task scope
-- **No database to manage**: all data lives in plain files — portable and auditable
-- **Offline capable**: runs entirely on-premises with no cloud dependency (except CDN assets)
-- **Extensible knowledge base**: add any number of Excel files; the index updates automatically
+- **Multi-team by design**: unrelated teams can share one installation with zero visibility into each other's data
+- **Configurable per team**: each team can import/export using its own Excel column layout, without a separate parser or exporter being written for it
+- **Minimal database footprint**: only teams/users/session-adjacent metadata and per-team configuration live in SQLite; Knowledge Base content itself stays in plain files — portable and auditable
+- **Offline capable**: runs entirely on-premises with no cloud dependency (except CDN assets and, optionally, Google Cloud Storage for export files)
+- **Extensible knowledge base**: add any number of Excel files per team; the index updates automatically
 
 ---
 
@@ -148,11 +169,20 @@ via a scheduled background job.
 
 | Component | Technology |
 |---|---|
-| KB files | Local filesystem (`.xlsx`) |
-| Vector indices | Local filesystem (`.faiss`) |
-| Mapping data | Local filesystem (`.json`) |
-| Temporary Preview backups | Local filesystem (`temp_data/stashes.json`) |
+| KB files | Local filesystem, one isolated tree per team (`storage/teams/<team_slug>/knowledge/*.xlsx`) |
+| Vector indices | Local filesystem, per team (`storage/teams/<team_slug>/embeddings/*.faiss`) |
+| Mapping/metadata data | Local filesystem, per team (`storage/teams/<team_slug>/embeddings/*.json`) |
+| Teams, users, Preview stash metadata, Export History, per-team import/export configuration | SQLite (`database/mhes.db`) — see `docs/DATABASE.md` |
+| Generated export files | Google Cloud Storage (private bucket, signed-URL downloads) — see `services/gcs_service.py` |
 | Logs | Local filesystem (rotating `.log`) |
+
+### Authentication
+
+| Component | Technology |
+|---|---|
+| Session | Flask's built-in, `SECRET_KEY`-signed cookie — no external session/auth library |
+| Password hashing | `werkzeug.security` |
+| Authorization | Custom decorators/`before_request` hooks (`utils/permissions.py`) — no external RBAC library |
 
 ---
 
@@ -175,10 +205,12 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open `http://localhost:5000` in your browser.
+Open `http://localhost:3500` in your browser and log in (see "Authentication & Teams" in the root
+README for the default Admin account on a fresh install).
 
 See the root [README.md](../README.md) for full installation and running instructions
-(prerequisites, Ollama setup, dev/production server commands).
+(prerequisites, Ollama setup, Google Cloud Storage setup, dev/production server commands,
+default-admin login).
 
 ---
 
@@ -186,9 +218,10 @@ See the root [README.md](../README.md) for full installation and running instruc
 
 | Document | Audience | Description |
 |---|---|---|
-| [../README.md](../README.md) | All | Project landing page: installation, running the server, folder structure, tech stack |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Developers, Architects | Application architecture, frontend/backend breakdown, AI chatbot flow, scheduler/Temporary Data subsystem (Mermaid diagrams) |
-| [DATABASE.md](DATABASE.md) | Developers, Sysadmins | Filesystem-based data stores, schema, and relationships |
+| [../README.md](../README.md) | All | Project landing page: installation, running the server, authentication/roles, folder structure, tech stack |
+| [MHES_User_Manual.md](MHES_User_Manual.md) | End users | Every screen (including Login and the Admin-only Manage Users/Manage Teams screens), step-by-step procedures, roles, error messages, FAQ, known limitations |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Developers, Architects | Application architecture, frontend/backend breakdown, a consolidated multi-team architecture overview (authentication flow, team architecture, Knowledge Base isolation, embedding structure, permission model, migration history), the AI chatbot flow, and the scheduler/Temporary Data subsystem (Mermaid diagrams) |
+| [DATABASE.md](DATABASE.md) | Developers, Sysadmins | Filesystem-based and SQLite-backed data stores, schema, relationships, and a consolidated schema-level migration history |
 
 ---
 
@@ -217,16 +250,21 @@ See the root [README.md](../README.md) for full installation and running instruc
 - **Streaming search results**: Stream chatbot results to the frontend progressively
 
 ### Additional Features
-- **User authentication**: Login system with role-based access (admin vs. estimator). Also needed
-  to properly scope Temporary Data stashes per-user — they are currently shared by everyone
-  using the app
+- **Team-scope Temporary Data**: Preview stashes are still shared across every logged-in user and
+  team — unlike the Knowledge Base and Export History, which are already team-isolated
+- **Self-service account management**: no password reset/change, and no in-app way to create/edit
+  users or teams yet — `/admin/users` and `/admin/teams` are read-only; accounts are created
+  directly via `repositories/user_repository.py`/`repositories/team_repository.py`
+- **Import/export configuration UI**: a team's Excel column mapping (including the phase-breakdown
+  "phases mode" — see `docs/ARCHITECTURE.md` §5g) and export template are configured directly via
+  `TeamImportConfigRepository`/`TeamExportTemplateRepository`; there's no admin screen for it
+- **Configurable header-row offset per sheet-selection UI**: currently set via the same repository
+  calls above (`header_row`, `sheet` keys) — a form to pick these visually (rather than inspecting
+  the workbook by hand) would make onboarding a new team's real-world Excel format much faster
 - **Named/managed project drafts**: automatic Preview stashing (see Main Features) already covers
   ad-hoc backup/restore; still missing is user-initiated naming/tagging of drafts for deliberate
   long-term reuse
 - **Audit trail**: Log who changed what and when on each estimate
 - **Knowledge base editor**: Edit KB Excel data directly in the browser without re-uploading
-- **Partial knowledge contribution on export**: currently, if any part of an exported project is
-  new, the *entire* project is added to the knowledge base; splitting out only the genuinely new
-  Category/Task/Activity data would avoid duplicating already-known content
 - **CI/CD pipeline**: Automated testing and deployment with GitHub Actions
 - **Docker support**: `Dockerfile` and `docker-compose.yml` for containerized deployment

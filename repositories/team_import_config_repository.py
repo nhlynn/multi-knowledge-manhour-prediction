@@ -9,11 +9,10 @@ CRUD, mirroring the style of ``repositories/team_repository.py`` and
 
 import json
 import logging
-import sqlite3
 from datetime import datetime
 from typing import Any
 
-from database.db import ensure_schema, get_connection
+from repositories.base_repository import BaseRepository
 
 logger = logging.getLogger(__name__)
 
@@ -28,15 +27,11 @@ CREATE INDEX IF NOT EXISTS idx_team_import_configs_team_id ON team_import_config
 """
 
 
-class TeamImportConfigRepository:
+class TeamImportConfigRepository(BaseRepository):
     """Repository for CRUD access to the ``team_import_configs`` table."""
 
     def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
-        ensure_schema(self._conn(), _SCHEMA)
-
-    def _conn(self) -> sqlite3.Connection:
-        return get_connection(self.db_path)
+        super().__init__(db_path, _SCHEMA)
 
     def upsert(self, *, team_id: int, column_mapping: dict[str, str]) -> dict[str, Any]:
         """Create or replace a team's column mapping.
@@ -53,23 +48,17 @@ class TeamImportConfigRepository:
             The saved record, with ``column_mapping`` decoded back into
             a dict.
         """
-        conn = self._conn()
         mapping_json = json.dumps(column_mapping, ensure_ascii=False)
         existing = self.get_by_team_id(team_id)
-        with conn:
-            if existing is None:
-                conn.execute(
-                    """
-                    INSERT INTO team_import_configs (team_id, column_mapping, created_at)
-                    VALUES (?, ?, ?)
-                    """,
-                    (team_id, mapping_json, datetime.now().isoformat()),
-                )
-            else:
-                conn.execute(
-                    "UPDATE team_import_configs SET column_mapping = ? WHERE team_id = ?",
-                    (mapping_json, team_id),
-                )
+        self._upsert_by_unique_column(
+            table="team_import_configs",
+            unique_column="team_id",
+            unique_value=team_id,
+            data_column="column_mapping",
+            data_value=mapping_json,
+            created_at=datetime.now().isoformat(),
+            existing=existing,
+        )
         record = self.get_by_team_id(team_id)
         assert record is not None
         logger.info("Saved import column mapping for team_id=%s: %r", team_id, column_mapping)
@@ -77,11 +66,10 @@ class TeamImportConfigRepository:
 
     def get_by_team_id(self, team_id: int) -> dict[str, Any] | None:
         """Return a team's column mapping record, or None if unconfigured."""
-        row = self._conn().execute(
+        record = self._fetch_one_dict(
             "SELECT * FROM team_import_configs WHERE team_id = ?", (team_id,)
-        ).fetchone()
-        if row is None:
+        )
+        if record is None:
             return None
-        record = dict(row)
         record["column_mapping"] = json.loads(record["column_mapping"])
         return record

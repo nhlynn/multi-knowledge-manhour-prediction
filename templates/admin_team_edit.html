@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Edit Team{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Edit Team</h2>
+    <a href="{{ url_for('admin.list_teams') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Back to Teams
+    </a>
+</div>
+
+<div class="card" style="max-width: 640px;">
+    <div class="card-body">
+        {% if errors %}
+        <div class="alert alert-danger" role="alert">
+            <strong><i class="bi bi-exclamation-circle me-1"></i>Please fix the following:</strong>
+            <ul class="mb-0 mt-1 ps-3">
+                {% for field, message in errors.items() %}
+                <li>{{ message }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        <form method="post" id="editTeamForm" novalidate>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="mb-3">
+                <label class="form-label" for="teamName">Team Name <span class="text-danger">*</span></label>
+                <input type="text" id="teamName" name="name" class="form-control {{ 'is-invalid' if errors.name }}"
+                       value="{{ name }}" maxlength="100" required>
+                {% if errors.name %}<div class="invalid-feedback">{{ errors.name }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="teamSlug">Team Code</label>
+                {% if slug_locked %}
+                <input type="text" id="teamSlug" class="form-control" value="{{ slug }}" disabled readonly>
+                <div class="form-text">
+                    Team Code can't be changed — this team already has users and/or stored data
+                    tied to it.
+                </div>
+                {% else %}
+                <input type="text" id="teamSlug" name="slug" class="form-control {{ 'is-invalid' if errors.slug }}"
+                       value="{{ slug }}" maxlength="60" required>
+                <div class="form-text">This team has no users or stored data yet, so its code can still be changed.</div>
+                {% if errors.slug %}<div class="invalid-feedback">{{ errors.slug }}</div>{% endif %}
+                {% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="teamDescription">Description</label>
+                <textarea id="teamDescription" name="description" class="form-control {{ 'is-invalid' if errors.description }}"
+                          rows="3" maxlength="500">{{ description }}</textarea>
+                <div class="form-text d-flex justify-content-between">
+                    <span>Optional.</span>
+                    <span id="teamDescriptionCount"></span>
+                </div>
+                {% if errors.description %}<div class="invalid-feedback">{{ errors.description }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="teamStatus">Status <span class="text-danger">*</span></label>
+                <select id="teamStatus" name="status" class="form-select {{ 'is-invalid' if errors.status }}">
+                    {% for s in statuses %}
+                    <option value="{{ s }}" {{ 'selected' if status == s else '' }}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+                {% if errors.status %}<div class="invalid-feedback">{{ errors.status }}</div>{% endif %}
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary" id="editTeamSubmit">
+                    <i class="bi bi-check-lg me-1"></i>Save Changes
+                </button>
+                <a href="{{ url_for('admin.list_teams') }}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    var descriptionInput = document.getElementById('teamDescription');
+    var descriptionCount = document.getElementById('teamDescriptionCount');
+    function updateDescriptionCount() {
+        descriptionCount.textContent = descriptionInput.value.length + ' / 500';
+    }
+    descriptionInput.addEventListener('input', updateDescriptionCount);
+    updateDescriptionCount();
+
+    document.getElementById('editTeamForm').addEventListener('submit', function() {
+        window.MHES.showLoading('Saving changes...');
+        var btn = document.getElementById('editTeamSubmit');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+    });
+})();
+</script>
+{% endblock %}

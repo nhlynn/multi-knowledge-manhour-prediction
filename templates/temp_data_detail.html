@@ -289,7 +289,10 @@
     }
 
     function deleteStashOnServer(id) {
-        return fetch(STASHES_API + '/' + encodeURIComponent(id), { method: 'DELETE' }).catch(function() {});
+        return fetch(STASHES_API + '/' + encodeURIComponent(id), {
+            method: 'DELETE',
+            headers: {'X-CSRFToken': window.MHES.csrfToken()},
+        }).catch(function() {});
     }
 
     function onDiscard() {

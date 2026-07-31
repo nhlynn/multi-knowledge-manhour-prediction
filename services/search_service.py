@@ -12,6 +12,17 @@ already scoped to one team's ``embeddings_folder``, so
 indexed files — there is no other team's data anywhere in this class's
 reach. The search algorithm itself (exact-match phase, FAISS fallback,
 grouping) is unchanged from Phase 3.
+
+Every mapping JSON a search touches is read from disk at most once per
+``semantic_search()`` call, via a small per-call cache
+(``_MappingCache``) threaded through every helper below — a single
+request may otherwise re-parse the same file many times (once per
+matched task, once during exact-match scanning, once during FAISS
+fallback grouping). A corrupt or unreadable mapping/index file is
+logged and treated as "no data for that source file" rather than
+crashing the whole search — consistent with the existing convention of
+silently skipping a source file whose index/mapping simply doesn't
+exist on disk.
 """
 
 import json
@@ -23,12 +34,48 @@ from typing import Any
 import faiss
 import numpy as np
 
-from services.embedding_service import EmbeddingService
+from services.embedding_service import EmbeddingService, load_faiss_index_cached
 
 logger = logging.getLogger(__name__)
 
 
 MAX_L2_DISTANCE = 1.4
+
+
+class _MappingCache:
+    """Per-``semantic_search()``-call memoization of mapping JSON reads.
+
+    Not a general-purpose cache — it lives exactly as long as one
+    ``semantic_search()`` call and is discarded afterward, so it can
+    never serve stale data across requests.
+    """
+
+    def __init__(self) -> None:
+        self._entries: dict[str, list[dict[str, Any]] | None] = {}
+
+    def get(self, mapping_path: str) -> list[dict[str, Any]] | None:
+        """Return the parsed mapping JSON at ``mapping_path``, or None if
+        it's missing/unreadable. Reads from disk at most once per path.
+        """
+        if mapping_path in self._entries:
+            return self._entries[mapping_path]
+
+        nested_json = _read_mapping_file(mapping_path)
+        self._entries[mapping_path] = nested_json
+        return nested_json
+
+
+def _read_mapping_file(mapping_path: str) -> list[dict[str, Any]] | None:
+    """Read and parse one mapping JSON file, or None if missing/unreadable."""
+    if not mapping_path or not os.path.isfile(mapping_path):
+        return None
+    try:
+        with open(mapping_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        logger.exception("Failed to read mapping file %s; treating as empty.", mapping_path)
+        return None
+
 
 class SearchService:
     """Service for semantic search across one team's FAISS-indexed knowledge files."""
@@ -54,86 +101,62 @@ class SearchService:
           - totals: overall totals across all matched results.
           - source: source filename.
         """
-        logger.debug(f"semantic_search(team={self.team_slug!r}, query={query!r})")
+        logger.debug("semantic_search(team=%r, query=%r)", self.team_slug, query)
 
         metadata = self.emb_svc._load_metadata()
         if not metadata:
             return {"categories": [], "totals": {}}
 
-        # --- Phase 1: Try exact name matching first -----------------------
-        exact_result = self._exact_match_search(query, metadata)
+        cache = _MappingCache()
+
+        exact_result = self._exact_match_search(query, metadata, cache)
         if exact_result is not None:
             return exact_result
 
-        # --- Phase 2: Fall back to FAISS semantic search ------------------
-        query_vec = self.emb_svc.generate_embeddings([query])
+        return self._faiss_fallback_search(query, metadata, cache, top_k)
 
+    # ------------------------------------------------------------------
+    # Phase 2: FAISS semantic-search fallback
+    # ------------------------------------------------------------------
+
+    def _faiss_fallback_search(
+        self, query: str, metadata: dict[str, Any], cache: _MappingCache, top_k: int,
+    ) -> dict[str, Any]:
+        """Semantic-vector search across every indexed file, used only
+        when exact/partial name matching found nothing.
+        """
+        hits = self._collect_faiss_hits(query, metadata, cache, top_k)
+        if not hits:
+            return {"categories": [], "totals": {}}
+
+        hits = _rank_and_filter_hits(hits, top_k)
+        if not hits:
+            return {"categories": [], "totals": {}}
+
+        return _group_results(hits, metadata, cache)
+
+    def _collect_faiss_hits(
+        self, query: str, metadata: dict[str, Any], cache: _MappingCache, top_k: int,
+    ) -> list[dict[str, Any]]:
+        """Run the query against every team file's FAISS index, collecting
+        raw hits (unranked, unfiltered). A file whose index/mapping is
+        missing or unreadable is logged and skipped — it never aborts
+        the search for the team's other files.
+        """
+        query_vec = self.emb_svc.generate_embeddings([query])
         hits: list[dict[str, Any]] = []
 
         for filename, file_meta in metadata.items():
-            index_path = file_meta.get("index_path", "")
-            mapping_path = file_meta.get("mapping_path", "")
+            hits.extend(_search_one_file(filename, file_meta, query_vec, cache, top_k))
 
-            if not os.path.isfile(index_path) or not os.path.isfile(mapping_path):
-                continue
+        return hits
 
-            index = faiss.read_index(index_path)
-            with open(mapping_path, "r", encoding="utf-8") as f:
-                nested_json = json.load(f)
-
-            from services.excel_parser import extract_texts_from_nested
-            texts = extract_texts_from_nested(nested_json)
-
-            k = min(top_k, index.ntotal)
-            distances, indices = index.search(query_vec, k)
-
-            id_lookup = _build_id_lookup(nested_json, filename)
-            text_to_id = _build_text_to_id(nested_json)
-
-            for dist, idx in zip(distances[0], indices[0]):
-                if idx < 0 or idx >= len(texts):
-                    continue
-                matched_text = texts[idx]
-                entry_id = text_to_id.get(matched_text)
-                if entry_id and entry_id in id_lookup:
-                    hit = dict(id_lookup[entry_id])
-                    hit["score"] = float(dist)
-                    hits.append(hit)
-
-        if not hits:
-            return {"categories": [], "totals": {}}
-
-        # Sort by score (lower L2 = better)
-        hits.sort(key=lambda x: x["score"])
-
-        # Reject results that are too far (no meaningful match)
-        hits = [h for h in hits if h["score"] <= MAX_L2_DISTANCE]
-        if not hits:
-            return {"categories": [], "totals": {}}
-
-        # Scope to the best hit's source file, so results never mix
-        # content from unrelated KB files.
-        best_source = hits[0]["source"]
-        hits = [h for h in hits if h["source"] == best_source]
-
-        # Scope filtering based on best hit type
-        best_type = hits[0]["type"]
-        if best_type == "activity":
-            hits = [h for h in hits if h["type"] == "activity"]
-        elif best_type == "task":
-            hits = [h for h in hits if h["type"] in ("task", "activity")]
-
-        # Filter out results that are too far from the best match.
-        best_score = hits[0]["score"]
-        max_distance = best_score * 1.2 if best_score > 0 else 0.5
-        hits = [h for h in hits if h["score"] <= max_distance]
-
-        hits = hits[:top_k]
-
-        return _group_results(hits, metadata)
+    # ------------------------------------------------------------------
+    # Phase 1: exact/partial name matching
+    # ------------------------------------------------------------------
 
     def _exact_match_search(
-        self, query: str, metadata: dict[str, Any]
+        self, query: str, metadata: dict[str, Any], cache: _MappingCache,
     ) -> dict[str, Any] | None:
         """Check if the query matches a category, task, or detail name.
 
@@ -152,14 +175,7 @@ class SearchService:
         query_lower = _clean_query(query)
         query_words = query_lower.split()
 
-        # Load all mapping files once
-        all_files: list[tuple[str, list[dict[str, Any]]]] = []
-        for filename, file_meta in metadata.items():
-            mapping_path = file_meta.get("mapping_path", "")
-            if not mapping_path or not os.path.isfile(mapping_path):
-                continue
-            with open(mapping_path, "r", encoding="utf-8") as f:
-                all_files.append((filename, json.load(f)))
+        all_files = _load_all_mappings(metadata, cache)
 
         # --- Try compound scoped search first ---
         # If the query shares at least one meaningful word with a category
@@ -185,14 +201,12 @@ class SearchService:
                     continue
 
                 # Search within this category only, most specific first
-                hit = self._match_in_category(
-                    cat, remainder, cat_name, filename
-                )
+                hit = self._match_in_category(cat, remainder, cat_name, filename, metadata, cache)
                 if hit is not None:
                     return hit
 
         # --- Global search (no category scope) ---
-        return self._match_globally(all_files, query_lower)
+        return self._match_globally(all_files, query_lower, metadata, cache)
 
     def _match_in_category(
         self,
@@ -200,23 +214,24 @@ class SearchService:
         query_lower: str,
         cat_name: str,
         filename: str,
+        metadata: dict[str, Any],
+        cache: _MappingCache,
     ) -> dict[str, Any] | None:
         """Search for a task or detail match within a single category.
 
         Uses _best_match_level to decide whether to return details or tasks.
         """
-        metadata = self.emb_svc._load_metadata()
         tasks = cat.get("tasks", [])
 
         level = _best_match_level(tasks, query_lower)
         if level == "detail":
             hits = _find_matching_details(tasks, query_lower, cat_name, filename)
             if hits:
-                return _group_results(hits, metadata)
+                return _group_results(hits, metadata, cache)
         elif level == "task":
             hits = _find_matching_tasks(tasks, query_lower, cat_name, filename)
             if hits:
-                return _group_results(hits, metadata)
+                return _group_results(hits, metadata, cache)
 
         return None
 
@@ -224,10 +239,10 @@ class SearchService:
         self,
         all_files: list[tuple[str, list[dict[str, Any]]]],
         query_lower: str,
+        metadata: dict[str, Any],
+        cache: _MappingCache,
     ) -> dict[str, Any] | None:
         """Search across all categories for matching detail/task/category."""
-        metadata = self.emb_svc._load_metadata()
-
         # Determine best match level across all categories
         all_tasks: list[dict[str, Any]] = []
         for _, nested_json in all_files:
@@ -245,7 +260,7 @@ class SearchService:
                         cat.get("tasks", []), query_lower, cat_name, filename
                     ))
             if hits:
-                return _group_results(hits, metadata)
+                return _group_results(hits, metadata, cache)
 
         elif level == "task":
             hits = []
@@ -256,7 +271,7 @@ class SearchService:
                         cat.get("tasks", []), query_lower, cat_name, filename
                     ))
             if hits:
-                return _group_results(hits, metadata)
+                return _group_results(hits, metadata, cache)
 
         # --- Category level ---
         hits = []
@@ -275,9 +290,127 @@ class SearchService:
                                 "score": 0.0,
                             })
         if hits:
-            return _group_results(hits, metadata)
+            return _group_results(hits, metadata, cache)
 
         return None
+
+
+# ------------------------------------------------------------------
+# Vector loading + per-file search
+# ------------------------------------------------------------------
+
+def _search_one_file(
+    filename: str,
+    file_meta: dict[str, Any],
+    query_vec: np.ndarray,
+    cache: _MappingCache,
+    top_k: int,
+) -> list[dict[str, Any]]:
+    """Load one file's FAISS index + mapping and return its raw query hits.
+
+    Returns an empty list (never raises) if the index/mapping is
+    missing or the index fails to load — see ``_MappingCache``/
+    ``_read_mapping_file`` for the mapping-side equivalent.
+    """
+    from services.excel_parser import extract_texts_from_nested
+
+    index_path = file_meta.get("index_path", "")
+    mapping_path = file_meta.get("mapping_path", "")
+
+    if not os.path.isfile(index_path) or not os.path.isfile(mapping_path):
+        return []
+
+    nested_json = cache.get(mapping_path)
+    if nested_json is None:
+        return []
+
+    index = _load_faiss_index(index_path)
+    if index is None:
+        return []
+
+    texts = extract_texts_from_nested(nested_json)
+    k = min(top_k, index.ntotal)
+    distances, indices = index.search(query_vec, k)
+
+    id_lookup = _build_id_lookup(nested_json, filename)
+    text_to_id = _build_text_to_id(nested_json)
+
+    hits: list[dict[str, Any]] = []
+    for dist, idx in zip(distances[0], indices[0]):
+        if idx < 0 or idx >= len(texts):
+            continue
+        matched_text = texts[idx]
+        entry_id = text_to_id.get(matched_text)
+        if entry_id and entry_id in id_lookup:
+            hit = dict(id_lookup[entry_id])
+            hit["score"] = float(dist)
+            hits.append(hit)
+    return hits
+
+
+def _load_faiss_index(index_path: str) -> "faiss.Index | None":
+    """Read one FAISS index file, cached (mtime-keyed) across requests —
+    see ``services.embedding_service.load_faiss_index_cached``. Returns
+    None if the file is missing or unreadable.
+    """
+    index = load_faiss_index_cached(index_path)
+    if index is None:
+        logger.warning("FAISS index %s missing or unreadable; skipping.", index_path)
+    return index
+
+
+# ------------------------------------------------------------------
+# Mapping-file loading helpers
+# ------------------------------------------------------------------
+
+def _load_all_mappings(
+    metadata: dict[str, Any], cache: _MappingCache,
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Load every team file's mapping JSON once, via ``cache``.
+
+    Files with a missing or unreadable mapping are skipped (logged by
+    ``_read_mapping_file``/``_MappingCache``), not fatal to the search.
+    """
+    all_files: list[tuple[str, list[dict[str, Any]]]] = []
+    for filename, file_meta in metadata.items():
+        mapping_path = file_meta.get("mapping_path", "")
+        nested_json = cache.get(mapping_path)
+        if nested_json is not None:
+            all_files.append((filename, nested_json))
+    return all_files
+
+
+def _rank_and_filter_hits(hits: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
+    """Sort FAISS hits by score and narrow them to one coherent result set:
+    same source file as the best hit, same "scope tier" (activity-only,
+    or task+activity), and within a relative distance of the best score.
+    """
+    # Sort by score (lower L2 = better)
+    hits = sorted(hits, key=lambda x: x["score"])
+
+    # Reject results that are too far (no meaningful match)
+    hits = [h for h in hits if h["score"] <= MAX_L2_DISTANCE]
+    if not hits:
+        return []
+
+    # Scope to the best hit's source file, so results never mix
+    # content from unrelated KB files.
+    best_source = hits[0]["source"]
+    hits = [h for h in hits if h["source"] == best_source]
+
+    # Scope filtering based on best hit type
+    best_type = hits[0]["type"]
+    if best_type == "activity":
+        hits = [h for h in hits if h["type"] == "activity"]
+    elif best_type == "task":
+        hits = [h for h in hits if h["type"] in ("task", "activity")]
+
+    # Filter out results that are too far from the best match.
+    best_score = hits[0]["score"]
+    max_distance = best_score * 1.2 if best_score > 0 else 0.5
+    hits = [h for h in hits if h["score"] <= max_distance]
+
+    return hits[:top_k]
 
 
 # ------------------------------------------------------------------
@@ -490,8 +623,12 @@ def _build_text_to_id(nested_json: list[dict[str, Any]]) -> dict[str, str]:
     return mapping
 
 
+# ------------------------------------------------------------------
+# Result grouping
+# ------------------------------------------------------------------
+
 def _group_results(
-    hits: list[dict[str, Any]], metadata: dict[str, Any]
+    hits: list[dict[str, Any]], metadata: dict[str, Any], cache: _MappingCache,
 ) -> dict[str, Any]:
     """Group hits into Category → Task → Activity structure.
 
@@ -506,9 +643,22 @@ def _group_results(
     full-task totals, keeping the numbers consistent with what the user
     sees.
     """
-    # ---- pass 1: collect per-task data --------------------------------
-    # key = (source, category, task_name)
-    # value = {"mode": "full"|"partial", "matched_details": set, ...}
+    seen_tasks = _collect_seen_tasks(hits, metadata, cache)
+    categories = _build_grouped_categories(seen_tasks, metadata, cache)
+    totals = _compute_grand_totals(categories)
+
+    return {"categories": categories, "totals": totals}
+
+
+def _collect_seen_tasks(
+    hits: list[dict[str, Any]], metadata: dict[str, Any], cache: _MappingCache,
+) -> "OrderedDict[tuple, dict[str, Any]]":
+    """Pass 1: collect per-task display mode ("full" vs "partial") and,
+    for partial tasks, which activities were actually matched.
+
+    key = (source, category, task_name)
+    value = {"mode": "full"|"partial", "matched_details": set, ...}
+    """
     seen_tasks: OrderedDict[tuple, dict[str, Any]] = OrderedDict()
 
     for hit in hits:
@@ -546,10 +696,8 @@ def _group_results(
         elif hit["type"] == "category":
             # Expand to all tasks in the category
             file_meta = metadata.get(source, {})
-            mapping_path = file_meta.get("mapping_path", "")
-            if os.path.isfile(mapping_path):
-                with open(mapping_path, "r", encoding="utf-8") as f:
-                    nested_json = json.load(f)
+            nested_json = cache.get(file_meta.get("mapping_path", ""))
+            if nested_json is not None:
                 for cat in nested_json:
                     if cat.get("category") == cat_name:
                         for task in cat.get("tasks", []):
@@ -565,7 +713,17 @@ def _group_results(
                             else:
                                 seen_tasks[tk]["mode"] = "full"
 
-    # ---- pass 2: build grouped output ---------------------------------
+    return seen_tasks
+
+
+def _build_grouped_categories(
+    seen_tasks: "OrderedDict[tuple, dict[str, Any]]",
+    metadata: dict[str, Any],
+    cache: _MappingCache,
+) -> list[dict[str, Any]]:
+    """Pass 2: turn the per-task display info from ``_collect_seen_tasks``
+    into the final Category → Task → Activity output list.
+    """
     cat_order: OrderedDict[tuple, dict[str, Any]] = OrderedDict()
 
     for task_key, task_info in seen_tasks.items():
@@ -578,51 +736,60 @@ def _group_results(
                 "tasks": [],
             }
 
-        # Load the full task from mapping
         file_meta = metadata.get(source, {})
-        full_task = _load_full_task(file_meta, cat_name, task_name)
+        full_task = _load_full_task(file_meta, cat_name, task_name, cache)
         if not full_task:
             continue
 
-        all_activities = full_task.get("activities", [])
+        task_row = _build_task_row(task_info, full_task)
+        cat_order[cat_key]["tasks"].append(task_row)
 
-        if task_info["mode"] == "full":
-            # Show all activities
-            activities = [
-                {"task_detail": a.get("task_detail", ""), "estimate_hours": a.get("estimate_hours", 0)}
-                for a in all_activities
-            ]
-        else:
-            # Show only matched activities
-            matched = task_info["matched_details"]
-            activities = [
-                {"task_detail": a.get("task_detail", ""), "estimate_hours": a.get("estimate_hours", 0)}
-                for a in all_activities
-                if a.get("task_detail", "") in matched
-            ]
+    return list(cat_order.values())
 
-        # Compute totals based on displayed activities
-        shown_estimate = sum(a["estimate_hours"] for a in activities)
-        task_buffer = full_task.get("buffer_hours", 0)
 
-        if task_info["mode"] == "full" or len(activities) == len(all_activities):
-            # Full task or all activities matched → use task-level buffer
-            buffer_hours = task_buffer
-        else:
-            # Partial: use standalone buffer (0.5h per activity)
-            buffer_hours = sum(0.5 for _ in activities)
+def _build_task_row(task_info: dict[str, Any], full_task: dict[str, Any]) -> dict[str, Any]:
+    """Build one output task row, showing either all of a task's
+    activities ("full" mode) or only the ones actually matched
+    ("partial" mode), with totals recomputed from what's shown.
+    """
+    all_activities = full_task.get("activities", [])
 
-        cat_order[cat_key]["tasks"].append({
-            "task": task_name,
-            "activities": activities,
-            "estimate_hours": shown_estimate,
-            "buffer_hours": buffer_hours,
-            "total_hours": shown_estimate + buffer_hours,
-        })
+    if task_info["mode"] == "full":
+        activities = [
+            {"task_detail": a.get("task_detail", ""), "estimate_hours": a.get("estimate_hours", 0)}
+            for a in all_activities
+        ]
+    else:
+        matched = task_info["matched_details"]
+        activities = [
+            {"task_detail": a.get("task_detail", ""), "estimate_hours": a.get("estimate_hours", 0)}
+            for a in all_activities
+            if a.get("task_detail", "") in matched
+        ]
 
-    categories = list(cat_order.values())
+    shown_estimate = sum(a["estimate_hours"] for a in activities)
+    task_buffer = full_task.get("buffer_hours", 0)
 
-    # ---- compute grand totals -----------------------------------------
+    if task_info["mode"] == "full" or len(activities) == len(all_activities):
+        # Full task or all activities matched → use task-level buffer
+        buffer_hours = task_buffer
+    else:
+        # Partial: use standalone buffer (0.5h per activity)
+        buffer_hours = sum(0.5 for _ in activities)
+
+    return {
+        "task": task_info["task"],
+        "activities": activities,
+        "estimate_hours": shown_estimate,
+        "buffer_hours": buffer_hours,
+        "total_hours": shown_estimate + buffer_hours,
+    }
+
+
+def _compute_grand_totals(categories: list[dict[str, Any]]) -> dict[str, float]:
+    """Sum task-estimate/estimate/buffer/final totals across every
+    displayed category/task/activity.
+    """
     total_task_estimate = 0
     total_estimate = 0
     total_buffer = 0
@@ -636,26 +803,20 @@ def _group_results(
                 total_task_estimate += act["estimate_hours"]
 
     return {
-        "categories": categories,
-        "totals": {
-            "task_estimate": total_task_estimate,
-            "estimate": total_estimate,
-            "buffer": total_buffer,
-            "final": total_final,
-        },
+        "task_estimate": total_task_estimate,
+        "estimate": total_estimate,
+        "buffer": total_buffer,
+        "final": total_final,
     }
 
 
 def _load_full_task(
-    file_meta: dict[str, Any], cat_name: str, task_name: str
+    file_meta: dict[str, Any], cat_name: str, task_name: str, cache: _MappingCache,
 ) -> dict[str, Any] | None:
     """Load a full task (with all activities) from the mapping file."""
-    mapping_path = file_meta.get("mapping_path", "")
-    if not mapping_path or not os.path.isfile(mapping_path):
+    nested_json = cache.get(file_meta.get("mapping_path", ""))
+    if nested_json is None:
         return None
-
-    with open(mapping_path, "r", encoding="utf-8") as f:
-        nested_json = json.load(f)
 
     for cat in nested_json:
         if cat.get("category") == cat_name:

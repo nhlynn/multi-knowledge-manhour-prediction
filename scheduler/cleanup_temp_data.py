@@ -40,7 +40,8 @@ def main() -> None:
     if args.days is not None:
         app.config["TEMP_DATA_RETENTION_DAYS"] = args.days
 
-    delete_expired_temp_data(app)
+    removed_count = delete_expired_temp_data(app)
+    print(f"Temp data cleanup: {removed_count} stash(es) removed.")
 
 
 if __name__ == "__main__":

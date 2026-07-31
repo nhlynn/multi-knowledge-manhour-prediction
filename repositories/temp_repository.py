@@ -9,7 +9,7 @@ import logging
 import sqlite3
 from typing import Any
 
-from database.db import ensure_schema, get_connection
+from repositories.base_repository import BaseRepository
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +26,15 @@ CREATE TABLE IF NOT EXISTS temp_stashes (
 );
 CREATE INDEX IF NOT EXISTS idx_temp_stashes_expires_at ON temp_stashes(expires_at);
 CREATE INDEX IF NOT EXISTS idx_temp_stashes_stash_type ON temp_stashes(stash_type);
+CREATE INDEX IF NOT EXISTS idx_temp_stashes_created_at ON temp_stashes(created_at);
 """
 
 
-class TempRepository:
+class TempRepository(BaseRepository):
     """Repository for CRUD access to the ``temp_stashes`` table."""
 
     def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
-        ensure_schema(self._conn(), _SCHEMA)
-
-    def _conn(self) -> sqlite3.Connection:
-        return get_connection(self.db_path)
+        super().__init__(db_path, _SCHEMA)
 
     def insert(self, record: dict[str, Any]) -> None:
         """Insert a new stash row.
@@ -62,9 +59,7 @@ class TempRepository:
 
     def get_by_id(self, stash_id: str) -> sqlite3.Row | None:
         """Return a single stash row by id, or None if not found."""
-        return self._conn().execute(
-            "SELECT * FROM temp_stashes WHERE id = ?", (stash_id,)
-        ).fetchone()
+        return self._fetch_one("SELECT * FROM temp_stashes WHERE id = ?", (stash_id,))
 
     def exists(self, stash_id: str) -> bool:
         """Return whether a stash with this id exists."""
@@ -73,13 +68,11 @@ class TempRepository:
     def list_all(self, stash_type: str | None = None) -> list[sqlite3.Row]:
         """Return all stashes, newest first, optionally filtered by type."""
         if stash_type is None:
-            return self._conn().execute(
-                "SELECT * FROM temp_stashes ORDER BY created_at DESC"
-            ).fetchall()
-        return self._conn().execute(
+            return self._fetch_all("SELECT * FROM temp_stashes ORDER BY created_at DESC")
+        return self._fetch_all(
             "SELECT * FROM temp_stashes WHERE stash_type = ? ORDER BY created_at DESC",
             (stash_type,),
-        ).fetchall()
+        )
 
     def list_page(
         self,
@@ -129,20 +122,19 @@ class TempRepository:
             params.append(f"%{project_name.lower()}%")
         where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-        conn = self._conn()
-        total = conn.execute(
+        total = self._fetch_one(
             f"SELECT COUNT(*) AS c FROM temp_stashes {where_clause}", params
-        ).fetchone()["c"]
+        )["c"]
 
         offset = max(page - 1, 0) * per_page
-        rows = conn.execute(
+        rows = self._fetch_all(
             f"""
             SELECT * FROM temp_stashes {where_clause}
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
             """,
             [*params, per_page, offset],
-        ).fetchall()
+        )
         return rows, total
 
     def delete(self, stash_id: str) -> bool:
@@ -157,24 +149,24 @@ class TempRepository:
 
     def delete_older_than(self, cutoff_iso: str) -> list[sqlite3.Row]:
         """Delete stashes with created_at before cutoff_iso, returning the deleted rows."""
-        conn = self._conn()
-        rows = conn.execute(
+        rows = self._fetch_all(
             "SELECT * FROM temp_stashes WHERE created_at < ? ORDER BY created_at ASC",
             (cutoff_iso,),
-        ).fetchall()
+        )
         if rows:
+            conn = self._conn()
             with conn:
                 conn.execute("DELETE FROM temp_stashes WHERE created_at < ?", (cutoff_iso,))
         return rows
 
     def clear_expired(self, now_iso: str) -> list[sqlite3.Row]:
         """Delete stashes whose expires_at has passed, returning the deleted rows."""
-        conn = self._conn()
-        rows = conn.execute(
+        rows = self._fetch_all(
             "SELECT * FROM temp_stashes WHERE expires_at IS NOT NULL AND expires_at < ?",
             (now_iso,),
-        ).fetchall()
+        )
         if rows:
+            conn = self._conn()
             with conn:
                 conn.execute(
                     "DELETE FROM temp_stashes WHERE expires_at IS NOT NULL AND expires_at < ?",
@@ -184,5 +176,4 @@ class TempRepository:
 
     def count(self) -> int:
         """Return the total number of stash rows."""
-        row = self._conn().execute("SELECT COUNT(*) AS c FROM temp_stashes").fetchone()
-        return row["c"]
+        return self._fetch_one("SELECT COUNT(*) AS c FROM temp_stashes")["c"]

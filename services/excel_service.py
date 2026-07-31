@@ -50,6 +50,28 @@ class ExcelService:
             and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
         )
 
+    @staticmethod
+    def is_safe_filename(filename: str) -> bool:
+        """Reject path traversal / directory separators in a KB filename.
+
+        A filename reaching this service should always be either a
+        ``werkzeug.secure_filename``-sanitized name (from ``save_file``)
+        or a literal choice from ``list_knowledge_files()`` — never
+        attacker-controlled. This exists as a defense-in-depth check for
+        the one path that *does* take a filename straight from a URL
+        segment (``routes/upload.py``'s delete/re-embed routes): Flask's
+        default route converter already rejects a forward slash in a
+        single ``<filename>`` segment, but not ``..`` or a backslash
+        (which *is* a path separator on Windows), so a value like
+        ``"..\\..\\secrets.xlsx"`` could otherwise escape ``kb_folder``.
+        """
+        return (
+            bool(filename)
+            and filename.lower().endswith(".xlsx")
+            and os.path.basename(filename) == filename
+            and ".." not in filename
+        )
+
     # ------------------------------------------------------------------
     # Duplicate detection
     # ------------------------------------------------------------------
@@ -64,6 +86,21 @@ class ExcelService:
             True if the file already exists.
         """
         return os.path.isfile(os.path.join(self.kb_folder, filename))
+
+    def find_existing_filenames(self, filenames: list[str]) -> list[str]:
+        """Return which of ``filenames`` (sanitized) already exist in kb_knowledge.
+
+        Args:
+            filenames: Candidate filenames as typed/selected by the user
+                (not yet sanitized) — each is passed through
+                ``secure_filename`` before the existence check, matching
+                what ``save_file`` would actually name it on disk.
+
+        Returns:
+            The subset of ``filenames`` (original, unsanitized strings)
+            that already exist.
+        """
+        return [name for name in filenames if self.file_exists(secure_filename(name))]
 
     def _generate_unique_name(self, filename: str) -> str:
         """Generate a unique filename by appending a timestamp.
@@ -113,10 +150,10 @@ class ExcelService:
         if self.file_exists(save_name):
             if duplicate_action == "overwrite":
                 overwritten = True
-                logger.info(f"Overwriting existing file: {save_name}")
+                logger.info("Overwriting existing file: %s", save_name)
             else:
                 save_name = self._generate_unique_name(save_name)
-                logger.info(f"Renamed to avoid duplicate: {save_name}")
+                logger.info("Renamed to avoid duplicate: %s", save_name)
 
         dest_path = os.path.join(self.kb_folder, save_name)
         file_storage.save(dest_path)
@@ -124,7 +161,7 @@ class ExcelService:
         size_kb = round(os.path.getsize(dest_path) / 1024, 1)
         uploaded_at = datetime.now().isoformat()
 
-        logger.info(f"Saved KB file: {save_name} ({size_kb} KB)")
+        logger.info("Saved KB file: %s (%s KB)", save_name, size_kb)
 
         return {
             "filename": save_name,
@@ -178,16 +215,25 @@ class ExcelService:
             filename: Name of the file to delete.
 
         Returns:
-            True if deleted, False if not found.
+            True if deleted, False if not found (or the filename fails
+            the path-safety check — see ``is_safe_filename``).
         """
-        filepath = os.path.join(self.kb_folder, filename)
+        if not self.is_safe_filename(filename):
+            logger.warning("Refused to delete unsafe filename: %r", filename)
+            return False
+
+        filepath = self.get_kb_path(filename)
         if not os.path.isfile(filepath):
-            logger.warning(f"File not found for deletion: {filename}")
+            logger.warning("File not found for deletion: %s", filename)
             return False
 
         os.remove(filepath)
-        logger.info(f"Deleted KB file: {filename}")
+        logger.info("Deleted KB file: %s", filename)
         return True
+
+    def get_kb_path(self, filename: str) -> str:
+        """Return the full path to a knowledge base file (does not check existence)."""
+        return os.path.join(self.kb_folder, filename)
 
     # ------------------------------------------------------------------
     # Reading
@@ -201,11 +247,18 @@ class ExcelService:
 
         Returns:
             DataFrame with cleaned column headers and no all-empty rows.
+
+        Raises:
+            ValueError: If ``filename`` fails the path-safety check (see
+                ``is_safe_filename``).
         """
-        filepath = os.path.join(self.kb_folder, filename)
-        logger.info(f"Reading Excel file: {filepath}")
+        if not self.is_safe_filename(filename):
+            raise ValueError(f"Unsafe filename: {filename!r}")
+
+        filepath = self.get_kb_path(filename)
+        logger.info("Reading Excel file: %s", filepath)
         df = pd.read_excel(filepath, engine="openpyxl")
         df.columns = df.columns.str.strip()
         df = df.dropna(how="all")
-        logger.info(f"Read {len(df)} rows, {len(df.columns)} columns from {filename}")
+        logger.info("Read %d rows, %d columns from %s", len(df), len(df.columns), filename)
         return df

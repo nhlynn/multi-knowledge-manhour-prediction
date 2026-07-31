@@ -41,6 +41,7 @@
             <div class="card-header"><h5 class="mb-0">Upload Excel Files</h5></div>
             <div class="card-body">
                 <form id="uploadForm" method="POST" enctype="multipart/form-data" action="{{ url_for('upload.upload_page') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
                         <label class="form-label">Select Excel Files (.xlsx)</label>
                         <!-- Hidden real input (no required — validation handled by JS) -->
@@ -132,6 +133,7 @@
                                 <td>
                                     {% if not f.has_embeddings %}
                                     <form method="POST" action="{{ url_for('upload.reembed_file', filename=f.filename) }}" class="d-inline reembed-form">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <button type="submit" class="btn btn-sm btn-outline-primary" title="Generate embeddings">
                                             <i class="bi bi-arrow-repeat"></i>
                                         </button>
@@ -139,6 +141,7 @@
                                     {% endif %}
                                     <form method="POST" action="{{ url_for('upload.delete_file', filename=f.filename) }}" class="d-inline delete-form"
                                           onsubmit="return confirm('Delete {{ f.filename }}? This cannot be undone.');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
                                             <i class="bi bi-trash"></i>
                                         </button>
@@ -313,7 +316,7 @@
 
         fetch('{{ url_for("upload.check_duplicates") }}', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': window.MHES.csrfToken()},
             body: JSON.stringify({filenames: filenames})
         })
         .then(function(r) { return r.json(); })

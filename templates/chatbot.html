@@ -619,7 +619,7 @@
 
         fetch('{{ url_for("chatbot.search") }}', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': window.MHES.csrfToken()},
             body: JSON.stringify({query: query, top_k: 10})
         })
         .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
@@ -716,7 +716,7 @@
         if (previewData && previewData.categories && previewData.categories.length > 0) {
             fetch('/preview/temp/stashes', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': window.MHES.csrfToken()},
                 body: JSON.stringify({
                     categories: previewData.categories,
                     totals: previewData.totals || {},

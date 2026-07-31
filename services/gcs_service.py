@@ -210,6 +210,26 @@ def blob_exists(file_path: str) -> bool:
         return False
 
 
+def list_existing_export_object_paths() -> set[str]:
+    """Return every GCS object path currently present under the export prefix.
+
+    Used to check existence for a whole page of Export History rows in
+    one GCS call instead of one ``blob_exists()`` network round trip per
+    row (see ``routes/export.py::list_exports``) — same "missing" result
+    as calling ``blob_exists`` per row (an empty set here means every
+    row's membership check is False, exactly like a failed/negative
+    ``blob_exists`` call), just far fewer network calls.
+    """
+    try:
+        bucket = _get_bucket()
+        return {blob.name for blob in bucket.list_blobs(prefix=GCS_EXPORT_PREFIX)}
+    except Exception:
+        logger.exception(
+            "Failed to list export objects in GCS under prefix '%s'.", GCS_EXPORT_PREFIX,
+        )
+        return set()
+
+
 def download_excel_bytes(file_path: str) -> bytes:
     """Download a GCS object's raw bytes.
 

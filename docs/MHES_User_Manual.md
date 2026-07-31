@@ -390,6 +390,7 @@ Requires the **Admin** or **Team Manager** role. Members attempting to reach thi
 - A warning banner listing affected file names is shown at the top of the page whenever one or more Knowledge Base files are missing embeddings.
 - Deleting a file asks for confirmation: "Delete {filename}? This cannot be undone."
 - Some teams may have a customized set of expected Excel column headers (e.g. a team using "Feature"/"Technology"/"Hours" instead of the default "Task List"/"Category"/"Estimate (Hours)"). If your team's files use different headers than the downloadable template shows, ask your system administrator whether your team has a custom column mapping configured.
+- Some teams' files break one task's hours down across several phase columns (e.g. Development, Code Review, QA, Testing, Risk, Management — each its own column, adding up to a grand total column). For teams configured this way, every one of those phase columns is imported as its own searchable Activity under the task — not just the grand total — so the detailed breakdown stays available for future estimates, not only the final number.
 
 ---
 

@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}Edit User{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Edit User</h2>
+    <a href="{{ url_for('admin.list_users') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Back to Users
+    </a>
+</div>
+
+<div class="card" style="max-width: 640px;">
+    <div class="card-body">
+        {% if errors %}
+        <div class="alert alert-danger" role="alert">
+            <strong><i class="bi bi-exclamation-circle me-1"></i>Please fix the following:</strong>
+            <ul class="mb-0 mt-1 ps-3">
+                {% for field, message in errors.items() %}
+                <li>{{ message }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="row mb-3">
+            <div class="col-6">
+                <div class="text-muted small">Created Date</div>
+                <div>{{ user.created_at }}</div>
+            </div>
+            <div class="col-6">
+                <div class="text-muted small">Last Login</div>
+                <div>{{ user.last_login or 'Never' }}</div>
+            </div>
+        </div>
+        <hr class="mb-3">
+
+        <form method="post" id="editUserForm" novalidate>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="mb-3">
+                <label class="form-label" for="userUsername">Username <span class="text-danger">*</span></label>
+                <input type="text" id="userUsername" name="username" class="form-control {{ 'is-invalid' if errors.username }}"
+                       value="{{ username }}" maxlength="50" required autocomplete="off">
+                <div class="form-text" id="userUsernameAvailability"></div>
+                {% if errors.username %}<div class="invalid-feedback">{{ errors.username }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="userEmail">Email</label>
+                <input type="email" id="userEmail" name="email" class="form-control {{ 'is-invalid' if errors.email }}"
+                       value="{{ email }}" maxlength="254" autocomplete="off">
+                <div class="form-text" id="userEmailAvailability"></div>
+                {% if errors.email %}<div class="invalid-feedback">{{ errors.email }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="userTeam">Team <span class="text-danger">*</span></label>
+                <select id="userTeam" name="team_id" class="form-select {{ 'is-invalid' if errors.team_id }}" required>
+                    {% for t in teams %}
+                    <option value="{{ t.id }}" {{ 'selected' if team_id == t.id|string else '' }}>{{ t.name }}</option>
+                    {% endfor %}
+                </select>
+                {% if errors.team_id %}<div class="invalid-feedback">{{ errors.team_id }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="userRole">Role <span class="text-danger">*</span></label>
+                {% if user.id == current_user_id %}
+                <select id="userRole" class="form-select" disabled>
+                    <option selected>{{ role }}</option>
+                </select>
+                <input type="hidden" name="role" value="{{ role }}">
+                <div class="form-text">You cannot change your own role.</div>
+                {% else %}
+                <select id="userRole" name="role" class="form-select {{ 'is-invalid' if errors.role }}" required>
+                    {% for r in roles %}
+                    <option value="{{ r }}" {{ 'selected' if role == r else '' }}>{{ r }}</option>
+                    {% endfor %}
+                </select>
+                {% if errors.role %}<div class="invalid-feedback">{{ errors.role }}</div>{% endif %}
+                {% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="userStatus">Status <span class="text-danger">*</span></label>
+                {% if user.id == current_user_id %}
+                <select id="userStatus" class="form-select" disabled>
+                    <option selected>{{ status }}</option>
+                </select>
+                <input type="hidden" name="status" value="{{ status }}">
+                <div class="form-text">You cannot deactivate your own account.</div>
+                {% else %}
+                <select id="userStatus" name="status" class="form-select {{ 'is-invalid' if errors.status }}">
+                    {% for s in statuses %}
+                    <option value="{{ s }}" {{ 'selected' if status == s else '' }}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+                {% if errors.status %}<div class="invalid-feedback">{{ errors.status }}</div>{% endif %}
+                {% endif %}
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary" id="editUserSubmit">
+                    <i class="bi bi-check-lg me-1"></i>Save Changes
+                </button>
+                <a href="{{ url_for('admin.admin_reset_password_page', user_id=user.id) }}" class="btn btn-outline-secondary">
+                    <i class="bi bi-key me-1"></i>Reset Password
+                </a>
+                <a href="{{ url_for('admin.list_users') }}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    var username = document.getElementById('userUsername');
+    var usernameAvailability = document.getElementById('userUsernameAvailability');
+    var usernameCheckTimer = null;
+    var usernameCheckSeq = 0;
+    var currentUserId = {{ user.id }};
+
+    function setUsernameHint(text, cssClass) {
+        usernameAvailability.textContent = text || '';
+        usernameAvailability.className = 'form-text' + (cssClass ? ' ' + cssClass : '');
+    }
+
+    username.addEventListener('input', function() {
+        clearTimeout(usernameCheckTimer);
+        var trimmed = username.value.trim();
+
+        if (!trimmed) {
+            setUsernameHint('');
+            return;
+        }
+
+        setUsernameHint('Checking availability...', 'text-muted');
+        var thisSeq = ++usernameCheckSeq;
+
+        usernameCheckTimer = setTimeout(function() {
+            fetch('/admin/users/check-username?username=' + encodeURIComponent(trimmed) + '&exclude_id=' + currentUserId)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (thisSeq !== usernameCheckSeq) return;
+                    if (data.available) {
+                        setUsernameHint('✓ Username is available.', 'text-success');
+                    } else {
+                        setUsernameHint('✗ ' + (data.reason || 'Username is not available.'), 'text-danger');
+                    }
+                })
+                .catch(function() {
+                    if (thisSeq !== usernameCheckSeq) return;
+                    setUsernameHint('');
+                });
+        }, 400);
+    });
+
+    var email = document.getElementById('userEmail');
+    var emailAvailability = document.getElementById('userEmailAvailability');
+    var emailCheckTimer = null;
+    var emailCheckSeq = 0;
+    // Mirrors services/user_service.py's _EMAIL_PATTERN — checked
+    // client-side first so an obviously malformed address never
+    // reaches the API at all.
+    var EMAIL_FORMAT_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+    function setEmailHint(text, cssClass) {
+        emailAvailability.textContent = text || '';
+        emailAvailability.className = 'form-text' + (cssClass ? ' ' + cssClass : '');
+    }
+
+    email.addEventListener('input', function() {
+        clearTimeout(emailCheckTimer);
+        var trimmed = email.value.trim();
+
+        if (!trimmed) {
+            setEmailHint('');
+            return;
+        }
+
+        if (!EMAIL_FORMAT_PATTERN.test(trimmed)) {
+            setEmailHint('✗ Invalid email format.', 'text-danger');
+            return;
+        }
+
+        setEmailHint('Checking availability...', 'text-muted');
+        var thisSeq = ++emailCheckSeq;
+
+        emailCheckTimer = setTimeout(function() {
+            fetch('/admin/users/check-email?email=' + encodeURIComponent(trimmed) + '&exclude_id=' + currentUserId)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (thisSeq !== emailCheckSeq) return;
+                    if (data.available) {
+                        setEmailHint('✓ Email is available.', 'text-success');
+                    } else {
+                        setEmailHint('✗ ' + (data.reason || 'Email is not available.'), 'text-danger');
+                    }
+                })
+                .catch(function() {
+                    if (thisSeq !== emailCheckSeq) return;
+                    setEmailHint('');
+                });
+        }, 400);
+    });
+
+    document.getElementById('editUserForm').addEventListener('submit', function() {
+        window.MHES.showLoading('Saving changes...');
+        var btn = document.getElementById('editUserSubmit');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+    });
+})();
+</script>
+{% endblock %}

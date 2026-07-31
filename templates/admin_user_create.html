@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+{% block title %}Create User{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Create User</h2>
+    <a href="{{ url_for('admin.list_users') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Back to Users
+    </a>
+</div>
+
+<div class="card" style="max-width: 640px;">
+    <div class="card-body">
+        {% if errors %}
+        <div class="alert alert-danger" role="alert">
+            <strong><i class="bi bi-exclamation-circle me-1"></i>Please fix the following:</strong>
+            <ul class="mb-0 mt-1 ps-3">
+                {% for field, message in errors.items() %}
+                <li>{{ message }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        <form method="post" id="createUserForm" novalidate>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="mb-3">
+                <label class="form-label" for="userUsername">Username <span class="text-danger">*</span></label>
+                <input type="text" id="userUsername" name="username" class="form-control {{ 'is-invalid' if errors.username }}"
+                       value="{{ username }}" maxlength="50" required autocomplete="off">
+                <div class="form-text">Only letters, numbers, underscores and dots are allowed.</div>
+                <div class="form-text" id="userUsernameAvailability"></div>
+                {% if errors.username %}<div class="invalid-feedback">{{ errors.username }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="userEmail">Email</label>
+                <input type="email" id="userEmail" name="email" class="form-control {{ 'is-invalid' if errors.email }}"
+                       value="{{ email }}" maxlength="254" autocomplete="off">
+                <div class="form-text">Optional.</div>
+                <div class="form-text" id="userEmailAvailability"></div>
+                {% if errors.email %}<div class="invalid-feedback">{{ errors.email }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="userPassword">Password <span class="text-danger">*</span></label>
+                <input type="password" id="userPassword" name="password" class="form-control {{ 'is-invalid' if errors.password }}"
+                       required autocomplete="new-password">
+                <div class="mt-1">
+                    <span class="badge d-none" id="passwordStrengthBadge"></span>
+                </div>
+                <ul class="list-unstyled small mb-0 mt-1" id="passwordChecklist">
+                    <li id="pwCheckLength" class="text-danger">✗ At least 8 characters</li>
+                    <li id="pwCheckUpper" class="text-danger">✗ Contains an uppercase letter</li>
+                    <li id="pwCheckLower" class="text-danger">✗ Contains a lowercase letter</li>
+                    <li id="pwCheckDigit" class="text-danger">✗ Contains a number</li>
+                    <li id="pwCheckSpecial" class="text-danger">✗ Contains a special character</li>
+                </ul>
+                {% if errors.password %}<div class="invalid-feedback">{{ errors.password }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="userConfirmPassword">Confirm Password <span class="text-danger">*</span></label>
+                <input type="password" id="userConfirmPassword" name="confirm_password"
+                       class="form-control {{ 'is-invalid' if errors.confirm_password }}"
+                       required autocomplete="new-password">
+                <div class="form-text" id="userConfirmPasswordHint"></div>
+                {% if errors.confirm_password %}<div class="invalid-feedback">{{ errors.confirm_password }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="userTeam">Team <span class="text-danger">*</span></label>
+                <select id="userTeam" name="team_id" class="form-select {{ 'is-invalid' if errors.team_id }}" required>
+                    <option value="" disabled {{ 'selected' if not team_id else '' }}>Select a team...</option>
+                    {% for t in teams %}
+                    <option value="{{ t.id }}" {{ 'selected' if team_id == t.id|string else '' }}>{{ t.name }}</option>
+                    {% endfor %}
+                </select>
+                {% if errors.team_id %}<div class="invalid-feedback">{{ errors.team_id }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="userRole">Role <span class="text-danger">*</span></label>
+                <select id="userRole" name="role" class="form-select {{ 'is-invalid' if errors.role }}" required>
+                    {% for r in roles %}
+                    <option value="{{ r }}" {{ 'selected' if role == r else '' }}>{{ r }}</option>
+                    {% endfor %}
+                </select>
+                {% if errors.role %}<div class="invalid-feedback">{{ errors.role }}</div>{% endif %}
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label" for="userStatus">Status <span class="text-danger">*</span></label>
+                <select id="userStatus" name="status" class="form-select {{ 'is-invalid' if errors.status }}">
+                    {% for s in statuses %}
+                    <option value="{{ s }}" {{ 'selected' if status == s else '' }}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+                {% if errors.status %}<div class="invalid-feedback">{{ errors.status }}</div>{% endif %}
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary" id="createUserSubmit">
+                    <i class="bi bi-check-lg me-1"></i>Create User
+                </button>
+                <a href="{{ url_for('admin.list_users') }}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/password-validation.js') }}"></script>
+<script>
+(function() {
+    var createSubmitBtn = document.getElementById('createUserSubmit');
+
+    // Centralizes the six independent "is this field currently valid"
+    // flags this form tracks (Username/Email/Password/Confirm
+    // Password/Team/Role). Each field calls setValid(name, bool)
+    // whenever its own state changes; the Create button is
+    // recalculated the same way every time, from every field's latest
+    // known value — no call site has to remember to also touch the
+    // button itself. This is purely a client-side UX guard — the
+    // server still fully re-validates every field on submit exactly as
+    // before (see routes/admin.py::create_user_submit), so nothing
+    // here changes what's actually accepted.
+    var FormValidationManager = (function() {
+        var fields = {
+            username: true,
+            email: true,
+            password: false,
+            confirmPassword: true,
+            team: false,
+            role: true,
+        };
+        function setValid(name, isValid) {
+            fields[name] = isValid;
+            var allValid = Object.keys(fields).every(function(key) { return fields[key]; });
+            createSubmitBtn.disabled = !allValid;
+        }
+        return { setValid: setValid };
+    })();
+
+    function setHint(el, text, cssClass) {
+        el.textContent = text || '';
+        el.className = 'form-text' + (cssClass ? ' ' + cssClass : '');
+    }
+
+    // Shared debounce+fetch+stale-response-guard logic behind both the
+    // Username and Email live availability checks below — the two
+    // fields differ only in endpoint, field name, and whether there's
+    // a client-side format check to run before ever calling the API.
+    function createAvailabilityChecker(options) {
+        var input = options.input;
+        var hintEl = options.hintEl;
+        var fieldName = options.fieldName;
+        var checkUrl = options.checkUrl;
+        var formatValidate = options.formatValidate; // optional: (trimmed) -> error string | null
+        var notAvailableFallback = options.notAvailableFallback;
+        var timer = null;
+        var seq = 0;
+
+        return function() {
+            clearTimeout(timer);
+            var trimmed = input.value.trim();
+
+            if (!trimmed) {
+                setHint(hintEl, '');
+                FormValidationManager.setValid(fieldName, true);
+                return;
+            }
+
+            if (formatValidate) {
+                var formatError = formatValidate(trimmed);
+                if (formatError) {
+                    setHint(hintEl, '✗ ' + formatError, 'text-danger');
+                    FormValidationManager.setValid(fieldName, false);
+                    return;
+                }
+            }
+
+            setHint(hintEl, 'Checking availability...', 'text-muted');
+            FormValidationManager.setValid(fieldName, false);
+            var thisSeq = ++seq;
+
+            timer = setTimeout(function() {
+                fetch(checkUrl + encodeURIComponent(trimmed))
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        // Ignore a stale response that resolved after a newer keystroke's request.
+                        if (thisSeq !== seq) return;
+                        if (data.available) {
+                            setHint(hintEl, '✓ ' + options.availableMessage, 'text-success');
+                            FormValidationManager.setValid(fieldName, true);
+                        } else {
+                            setHint(hintEl, '✗ ' + (data.reason || notAvailableFallback), 'text-danger');
+                            FormValidationManager.setValid(fieldName, false);
+                        }
+                    })
+                    .catch(function() {
+                        if (thisSeq !== seq) return;
+                        setHint(hintEl, '');
+                        // Fail open on a network/check error — don't permanently
+                        // block submission just because the live check itself
+                        // failed; the server still validates on submit either way.
+                        FormValidationManager.setValid(fieldName, true);
+                    });
+            }, 400);
+        };
+    }
+
+    var username = document.getElementById('userUsername');
+    var checkUsername = createAvailabilityChecker({
+        input: username,
+        hintEl: document.getElementById('userUsernameAvailability'),
+        fieldName: 'username',
+        checkUrl: '/admin/users/check-username?username=',
+        availableMessage: 'Username is available.',
+        notAvailableFallback: 'Username is not available.',
+    });
+    username.addEventListener('input', checkUsername);
+
+    var email = document.getElementById('userEmail');
+    // Mirrors services/user_service.py's _EMAIL_PATTERN — checked
+    // client-side first so an obviously malformed address never
+    // reaches the API at all.
+    var EMAIL_FORMAT_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+    var checkEmail = createAvailabilityChecker({
+        input: email,
+        hintEl: document.getElementById('userEmailAvailability'),
+        fieldName: 'email',
+        checkUrl: '/admin/users/check-email?email=',
+        availableMessage: 'Email is available.',
+        notAvailableFallback: 'Email is not available.',
+        formatValidate: function(trimmed) {
+            return EMAIL_FORMAT_PATTERN.test(trimmed) ? null : 'Invalid email format.';
+        },
+    });
+    email.addEventListener('input', checkEmail);
+
+    // Password requirements checklist + strength badge, and Confirm
+    // Password live match — both from the shared password-validation
+    // module (static/js/password-validation.js) so this form, Admin
+    // Reset Password, and Forgot Password's Set New Password step all
+    // enforce/display the exact same rules from one place.
+    var password = document.getElementById('userPassword');
+    var confirmPassword = document.getElementById('userConfirmPassword');
+
+    window.MHES.passwordValidation.attachChecklist({
+        passwordInput: password,
+        checklistItems: {
+            length: document.getElementById('pwCheckLength'),
+            upper: document.getElementById('pwCheckUpper'),
+            lower: document.getElementById('pwCheckLower'),
+            digit: document.getElementById('pwCheckDigit'),
+            special: document.getElementById('pwCheckSpecial'),
+        },
+        strengthBadge: document.getElementById('passwordStrengthBadge'),
+        onChange: function(allPassed) {
+            FormValidationManager.setValid('password', allPassed);
+        },
+    });
+
+    window.MHES.passwordValidation.attachConfirmMatch({
+        passwordInput: password,
+        confirmInput: confirmPassword,
+        hintEl: document.getElementById('userConfirmPasswordHint'),
+        onChange: function(matches) {
+            FormValidationManager.setValid('confirmPassword', matches);
+        },
+    });
+
+    // Team has an empty placeholder option (no team picked yet); Role
+    // always has a real value selected (no empty option), so it's
+    // effectively always "selected" — checked anyway for correctness
+    // rather than assumed.
+    var teamSelect = document.getElementById('userTeam');
+    var roleSelect = document.getElementById('userRole');
+
+    function updateTeamState() {
+        FormValidationManager.setValid('team', !!teamSelect.value);
+    }
+    function updateRoleState() {
+        FormValidationManager.setValid('role', !!roleSelect.value);
+    }
+    teamSelect.addEventListener('change', updateTeamState);
+    roleSelect.addEventListener('change', updateRoleState);
+    updateTeamState();
+    updateRoleState();
+
+    document.getElementById('createUserForm').addEventListener('submit', function() {
+        window.MHES.showLoading('Creating user...');
+        var btn = createSubmitBtn;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creating...';
+    });
+})();
+</script>
+{% endblock %}

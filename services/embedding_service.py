@@ -20,6 +20,7 @@ which folder happened to be passed in.
 import json
 import logging
 import os
+import threading
 from datetime import datetime
 from typing import Any
 
@@ -31,6 +32,57 @@ from sentence_transformers import SentenceTransformer
 logger = logging.getLogger(__name__)
 
 METADATA_FILE = "metadata.json"
+
+# Process-wide cache of loaded SentenceTransformer models, keyed by model
+# name. Every route constructs a fresh EmbeddingService per request (see
+# routes/upload.py, routes/chatbot.py) — without this cache, the ~90MB
+# model would be reloaded from disk on every single upload/search
+# request instead of once per process. In practice there is exactly one
+# model name across the whole app (``Config.EMBEDDING_MODEL``), so this
+# cache holds at most one entry for the lifetime of the process — not an
+# unbounded/growing cache.
+_MODEL_CACHE: dict[str, SentenceTransformer] = {}
+_MODEL_CACHE_LOCK = threading.Lock()
+
+# Process-wide cache of loaded FAISS indices, keyed by absolute index
+# path and self-invalidating on the file's mtime — so a re-embed (which
+# rewrites the .faiss file, changing its mtime) is picked up on the next
+# load without any explicit cache-eviction call. Bounded by the number
+# of distinct KB files ever searched/embedded in this process's
+# lifetime, i.e. by real Knowledge Base size — not per-request growth.
+_FAISS_INDEX_CACHE: dict[str, tuple[float, "faiss.Index"]] = {}
+
+
+def load_faiss_index_cached(index_path: str) -> "faiss.Index | None":
+    """Read a FAISS index from disk, reusing a cached instance if the
+    file hasn't changed since it was last loaded.
+
+    Shared by ``EmbeddingService.load_index`` and
+    ``services.search_service`` (the actual per-request search hot
+    path), so a search request doesn't re-read and re-deserialize the
+    same unchanged index file every time.
+
+    Returns:
+        The loaded index, or None if the file doesn't exist or fails to
+        load (caller decides how to handle that — e.g. skip this file).
+    """
+    try:
+        mtime = os.path.getmtime(index_path)
+    except OSError:
+        return None
+
+    cached = _FAISS_INDEX_CACHE.get(index_path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+
+    try:
+        index = faiss.read_index(index_path)
+    except Exception:
+        logger.exception("Failed to read FAISS index %s.", index_path)
+        return None
+
+    _FAISS_INDEX_CACHE[index_path] = (mtime, index)
+    return index
 
 
 class EmbeddingService:
@@ -62,10 +114,32 @@ class EmbeddingService:
     # ------------------------------------------------------------------
 
     def load_model(self) -> None:
-        """Load the sentence transformer model (lazy, once)."""
-        if self.model is None:
-            logger.info(f"Loading embedding model: {self.model_name}")
+        """Load the sentence transformer model (lazy, once per process).
+
+        Reuses a process-wide cached model instance keyed by
+        ``model_name`` if another ``EmbeddingService`` (any team, any
+        earlier request) has already loaded it — the model itself has no
+        team-specific state, so sharing it across instances/requests is
+        safe and produces identical embeddings.
+        """
+        if self.model is not None:
+            return
+
+        cached = _MODEL_CACHE.get(self.model_name)
+        if cached is not None:
+            self.model = cached
+            return
+
+        with _MODEL_CACHE_LOCK:
+            # Re-check inside the lock: another thread may have finished
+            # loading it while this thread was waiting to acquire.
+            cached = _MODEL_CACHE.get(self.model_name)
+            if cached is not None:
+                self.model = cached
+                return
+            logger.info("Loading embedding model: %s", self.model_name)
             self.model = SentenceTransformer(self.model_name)
+            _MODEL_CACHE[self.model_name] = self.model
             logger.info("Embedding model loaded successfully.")
 
     def generate_embeddings(self, texts: list[str]) -> np.ndarray:
@@ -79,7 +153,7 @@ class EmbeddingService:
         """
         self.load_model()
         assert self.model is not None
-        logger.info(f"Generating embeddings for {len(texts)} texts...")
+        logger.info("Generating embeddings for %d texts...", len(texts))
         embeddings = self.model.encode(
             texts, show_progress_bar=False, convert_to_numpy=True
         )
@@ -98,9 +172,7 @@ class EmbeddingService:
         dimension = embeddings.shape[1]
         self.index = faiss.IndexFlatL2(dimension)
         self.index.add(embeddings)
-        logger.info(
-            f"FAISS index built: {self.index.ntotal} vectors, dim={dimension}"
-        )
+        logger.info("FAISS index built: %d vectors, dim=%d", self.index.ntotal, dimension)
 
     def save_index(self, index_name: str) -> str:
         """Save FAISS index to disk.
@@ -116,25 +188,32 @@ class EmbeddingService:
 
         index_path = os.path.join(self.embeddings_folder, f"{index_name}.faiss")
         faiss.write_index(self.index, index_path)
-        logger.info(f"FAISS index saved (team={self.team_slug}): {index_path}")
+        # Populate the cache with the index already in memory (keyed by
+        # its freshly-written mtime), so the very next load of this same
+        # path — e.g. this same request's search, or a re-embed followed
+        # immediately by a search — doesn't re-read what's already here.
+        _FAISS_INDEX_CACHE[index_path] = (os.path.getmtime(index_path), self.index)
+        logger.info("FAISS index saved (team=%s): %s", self.team_slug, index_path)
         return index_path
 
     def load_index(self, index_name: str) -> bool:
-        """Load FAISS index from disk.
+        """Load FAISS index from disk (cached — see ``load_faiss_index_cached``).
 
         Args:
             index_name: Name of the index file (without extension).
 
         Returns:
-            True if loaded successfully.
+            True if loaded successfully, False if the file is missing or
+            unreadable.
         """
         index_path = os.path.join(self.embeddings_folder, f"{index_name}.faiss")
-        if not os.path.isfile(index_path):
-            logger.warning(f"Index file not found: {index_path}")
+        index = load_faiss_index_cached(index_path)
+        if index is None:
+            logger.warning("Index file not found or unreadable: %s", index_path)
             return False
 
-        self.index = faiss.read_index(index_path)
-        logger.info(f"FAISS index loaded (team={self.team_slug}): {self.index.ntotal} vectors")
+        self.index = index
+        logger.info("FAISS index loaded (team=%s): %d vectors", self.team_slug, self.index.ntotal)
         return True
 
     # ------------------------------------------------------------------
@@ -231,13 +310,11 @@ class EmbeddingService:
 
         # 1. Convert Excel to nested JSON
         nested_json = excel_to_nested_json(excel_path, column_mapping=column_mapping)
-
         if not nested_json:
             raise ValueError(f"No data found in {filename}")
 
         # 2. Extract text fields for embedding
         texts = extract_texts_from_nested(nested_json)
-
         if not texts:
             raise ValueError(f"No text chunks generated from {filename}")
 
@@ -249,30 +326,14 @@ class EmbeddingService:
         index_path = self.save_index(index_name)
 
         # 5. Save nested JSON as mapping
-        mapping_path = os.path.join(
-            self.embeddings_folder, f"{index_name}_mapping.json"
-        )
-        with open(mapping_path, "w", encoding="utf-8") as f:
-            json.dump(nested_json, f, indent=2, ensure_ascii=False)
+        mapping_path = self._save_mapping_file(index_name, nested_json)
 
         # 6. Update central metadata
-        category_names = [c["category"] for c in nested_json]
-        embedded_at = datetime.now().isoformat()
-        file_meta = {
-            "filename": filename,
-            "team": self.team_slug,
-            "categories": category_names,
-            "num_categories": len(nested_json),
-            "num_vectors": len(texts),
-            "dimension": int(embeddings.shape[1]),
-            "index_path": index_path,
-            "mapping_path": mapping_path,
-            "embedded_at": embedded_at,
-        }
-
-        metadata = self._load_metadata()
-        metadata[filename] = file_meta
-        self._save_metadata(metadata)
+        file_meta = self._build_file_metadata_record(
+            filename=filename, nested_json=nested_json, texts=texts,
+            embeddings=embeddings, index_path=index_path, mapping_path=mapping_path,
+        )
+        self._remember_file_metadata(filename, file_meta)
 
         logger.info(
             f"Embeddings generated for '{filename}' (team={self.team_slug}): "
@@ -280,6 +341,44 @@ class EmbeddingService:
             f"{len(texts)} text chunks"
         )
         return file_meta
+
+    def _save_mapping_file(self, index_name: str, nested_json: list[dict[str, Any]]) -> str:
+        """Persist the nested Category → Task → Activity JSON as this
+        file's mapping file, returning its path.
+        """
+        mapping_path = os.path.join(self.embeddings_folder, f"{index_name}_mapping.json")
+        with open(mapping_path, "w", encoding="utf-8") as f:
+            json.dump(nested_json, f, indent=2, ensure_ascii=False)
+        return mapping_path
+
+    def _build_file_metadata_record(
+        self,
+        *,
+        filename: str,
+        nested_json: list[dict[str, Any]],
+        texts: list[str],
+        embeddings: np.ndarray,
+        index_path: str,
+        mapping_path: str,
+    ) -> dict[str, Any]:
+        """Build this file's entry for the central ``metadata.json`` registry."""
+        return {
+            "filename": filename,
+            "team": self.team_slug,
+            "categories": [c["category"] for c in nested_json],
+            "num_categories": len(nested_json),
+            "num_vectors": len(texts),
+            "dimension": int(embeddings.shape[1]),
+            "index_path": index_path,
+            "mapping_path": mapping_path,
+            "embedded_at": datetime.now().isoformat(),
+        }
+
+    def _remember_file_metadata(self, filename: str, file_meta: dict[str, Any]) -> None:
+        """Add/replace one file's entry in the central metadata registry."""
+        metadata = self._load_metadata()
+        metadata[filename] = file_meta
+        self._save_metadata(metadata)
 
     # ------------------------------------------------------------------
     # Status helpers
@@ -298,6 +397,30 @@ class EmbeddingService:
         index_path = os.path.join(self.embeddings_folder, f"{index_name}.faiss")
         return os.path.isfile(index_path)
 
+    def annotate_files_with_embedding_status(self, kb_files: list[dict[str, Any]]) -> None:
+        """Enrich a Knowledge Base file listing with this team's embedding status.
+
+        Mutates each dict in ``kb_files`` in place, adding
+        ``has_embeddings``, ``num_categories``, and ``num_vectors`` —
+        the exact fields the Upload Files page displays per file.
+
+        Args:
+            kb_files: File listing from ``ExcelService.list_knowledge_files()``.
+        """
+        # Loaded once and reused for every file below — calling
+        # get_file_metadata() per file would re-read and re-parse the
+        # same metadata.json from disk once per KB file in the list.
+        metadata = self._load_metadata()
+        for f in kb_files:
+            f["has_embeddings"] = self.has_index(f["filename"])
+            emb_meta = metadata.get(f["filename"])
+            if emb_meta:
+                f["num_categories"] = emb_meta.get("num_categories", 0)
+                f["num_vectors"] = emb_meta.get("num_vectors", 0)
+            else:
+                f["num_categories"] = 0
+                f["num_vectors"] = 0
+
     # ------------------------------------------------------------------
     # Deletion
     # ------------------------------------------------------------------
@@ -315,36 +438,11 @@ class EmbeddingService:
             path = os.path.join(self.embeddings_folder, f"{index_name}{ext}")
             if os.path.isfile(path):
                 os.remove(path)
-                logger.info(f"Deleted: {path}")
+                logger.info("Deleted: %s", path)
 
         # Remove from central metadata
         metadata = self._load_metadata()
         if filename in metadata:
             del metadata[filename]
             self._save_metadata(metadata)
-            logger.info(f"Removed '{filename}' from metadata.json (team={self.team_slug})")
-
-
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
-
-def _record_to_text(record: dict[str, Any]) -> str:
-    """Convert a record dictionary to a searchable text chunk.
-
-    Concatenates all key-value pairs (skipping internal keys like
-    ``_sheet``) into a single string.
-
-    Args:
-        record: Dictionary of column name to value.
-
-    Returns:
-        Text chunk in ``key: value | key: value`` format.
-    """
-    parts = []
-    for key, value in record.items():
-        if key.startswith("_"):
-            continue
-        if value is not None and str(value).strip():
-            parts.append(f"{key}: {value}")
-    return " | ".join(parts)
+            logger.info("Removed '%s' from metadata.json (team=%s)", filename, self.team_slug)

@@ -2,8 +2,8 @@
 
 ## 1. System Overview
 
-MHES (Man Hour Estimation System) is a Flask web application that helps
-Infrastructure Engineers estimate man-hours by searching a knowledge base of
+MHESD (Man Hour Expectation for Development) is a Flask web application that helps
+Engineers estimate man-hours by searching a knowledge base of
 Excel files using AI semantic search. There is no traditional database —
 all state is persisted on the local filesystem (Excel files, FAISS vector
 indices, and JSON metadata), including a lightweight in-process scheduler
@@ -175,6 +175,7 @@ their own" gap that existed between Phase 3 and Phase 4.
 | 6 | `export_history` gained `team_id`/`created_by_user_id`; Export History list/download/view scoped per team (Admin sees all). | `services/export_history_service.py`, `routes/export.py` |
 | 7 | Per-team Excel **import** column mapping — one parser, configurable roles. | `repositories/team_import_config_repository.py`, `services/excel_parser.py` |
 | 8 | Per-team Excel **export** column template — one renderer, configurable columns. | `repositories/team_export_template_repository.py`, `routes/export.py::_build_workbook` |
+| 9 | Import "phases mode" — configurable `sheet`/`header_row` (fixes real files whose headers aren't on row 1) and per-row phase-column expansion (each phase becomes its own Activity Detail, instead of collapsing a row to one total). | `services/excel_parser.py::_process_phases_sheet` |
 
 Every phase after Phase 1 was designed so that a team with no
 configuration for that phase's feature behaves identically to before the
@@ -873,6 +874,17 @@ read-only before any edit capability existed.
 
 See `docs/DATABASE.md` §12 for the full `team_import_configs` schema.
 
+> **Naming note:** the seed migration referenced above
+> (`seed_development_team_import_config`) still looks for a team with
+> slug `development-team`. "Development Team" was later renamed in place
+> to "Bamawl Team" (slug `bamawl-team`) via a direct
+> `TeamRepository`/`UserRepository` update — a manual admin action, not
+> itself a tracked migration. The already-applied seed is unaffected
+> (it's tracked in `db_migrations` and never re-runs), but the
+> migration's own function name/slug reference is now historical rather
+> than descriptive of the team it originally seeded, and would no longer
+> find a matching team on a fresh install run today.
+
 ## 5h. Team-Specific Excel Export Templates (Phase 8)
 
 `routes/export.py::_build_workbook` mixes two kinds of logic: **shared
@@ -944,6 +956,118 @@ precedent as Phase 7's import mapping; configured directly via
 `TeamExportTemplateRepository.upsert()` for now.
 
 See `docs/DATABASE.md` §13 for the full `team_export_templates` schema.
+
+## 5i. Phase-Breakdown Excel Import ("Phases Mode")
+
+Real-world team Excel files onboarded after Phase 7 (`bamawl_import_export_format.xlsx`,
+`kikan_import_export_format.xlsx`, `sgl_import_export_format.xlsx` in
+`simple_resource/`) exposed two problems the flat `column_mapping` from
+Phase 7 didn't solve:
+
+1. **The real header row often isn't row 1.** These workbooks have a
+   percentage/phase-group block sitting *above* the real header row
+   (e.g. Bamawl's `ALL_Detail` and KiKan's `工数詳細` both have their
+   real headers on row 4; SGL's detail sheet has them on row 2).
+   `pd.read_excel` always defaulted to reading row 1 as the header, so
+   every column came back as `Unnamed: 0`, `Unnamed: 1`... and the
+   sheet was skipped regardless of how `column_mapping` was configured.
+2. **Collapsing a row to one `estimate` value throws away exactly the
+   detail a future estimate needs.** Each row in these files already
+   breaks its total down across many phase columns (Development, Code
+   Review, Prototype, Business Flow, ERD, DFD, DB Design, Test
+   Specification, Implementation, Risk, Management, ...). Mapping
+   `estimate` to only the `Total(h)` column — the Phase 7 approach —
+   would discard every one of those phases permanently; there is no
+   field anywhere in MHES's data model to hold them once collapsed, so
+   they could never be recovered or reused for a future estimate.
+
+**Fix for #1 — `sheet`/`header_row` in `column_mapping`:**
+`excel_to_nested_json` now reads `column_mapping.get("sheet")` (if
+given, only that one sheet is read at all — the workbook's other tabs,
+e.g. cost-summary sheets like `見積・金額サマリ`/`工数・費用`, are
+never even attempted) and `column_mapping.get("header_row")`
+(1-indexed spreadsheet row, converted to pandas' 0-indexed `header=`
+argument). Omitting both reproduces the exact pre-existing behavior
+(read every sheet, header row 1).
+
+**Fix for #2 — "phases mode":** when `column_mapping` contains a
+`phase_columns` list, `excel_to_nested_json` routes the sheet through
+`_process_phases_sheet` instead of the flat category/task/detail/estimate
+logic. Each row still becomes one Task, but **every configured phase
+column that has a value becomes its own Activity Detail** under that
+task — nothing is collapsed into a single number:
+
+```
+Task: Login/Logout
+  ├─ Activity: Development        — 24h
+  ├─ Activity: Code Review        — 1.68h
+  ├─ Activity: Prototype          — 3.6h
+  ├─ Activity: Business Flow      — 0.96h
+  ├─ Activity: Screen/Form/Function — 9.6h
+  ├─ Activity: Risk               — 3.36h
+  ├─ Activity: Management Manhours — 12.13h
+  └─ ... (every phase column present with a nonzero value)
+```
+
+The Task's total (`estimate_hours`) is still computed exactly as
+before — `_build_nested_output` already sums whatever activities a task
+has, unchanged — so no other code (embedding, search, export) needed to
+change at all; only how `excel_to_nested_json` populates its
+intermediate `all_categories` structure changed.
+
+**Config shape (phases mode):**
+```json
+{
+  "sheet": "ALL_Detail",
+  "header_row": 4,
+  "task_column": "Function",
+  "category": "Bamawl ERP",
+  "phase_columns": [
+    {"label": "Development", "column": "Development man-hours (h)"},
+    {"label": "Code Review", "column": "Code review (h)"},
+    {"label": "Prototype", "column": "Prototype(h)"}
+  ],
+  "total_column": "Total(h)"
+}
+```
+- `task_column` (required) — the column holding each row's task/function name.
+- `category_column` *or* `category` (one required) — either read a real
+  grouping column per row (forward-filled, like the flat mode's category
+  handling), or apply one fixed literal category name to every row (for
+  files with no grouping column at all, e.g. Bamawl's `ALL_Detail`).
+- `phase_columns` (required, ≥1) — each becomes one Activity Detail.
+  Column names are matched whitespace/newline-tolerant and
+  case-insensitively (`_find_column`/`_normalize_header`), since these
+  headers are frequently wrapped across lines purely for column width
+  (e.g. `"\nDevelopment man-hours (h)\n"`).
+- `total_column` (optional) — never stored; used only as a sanity
+  cross-check, logging a warning if the sum of matched phase columns
+  disagrees with this column's value by more than 0.5h for a row (a
+  signal that a phase column was missed or mismatched, not a hard
+  failure).
+
+A row with no task name (typically a group-rollup/summary row in these
+workbooks) or with every phase at zero/blank is skipped, same spirit as
+the flat mode's "no detail = skip this row" rule.
+
+**Explicitly unchanged:** `_build_nested_output`, `extract_texts_from_nested`,
+`services/embedding_service.py`, `services/search_service.py`, and every
+export code path — none of them needed to change, since a task with 10
+activities is structurally identical (as far as they're concerned) to a
+task with 1.
+
+**Known limitation:** a handful of Bamawl's `ALL_Detail` phase columns
+are ambiguous/duplicated in the source workbook itself (e.g. `Review(h)`
+appears twice — once after `Screen/Form/Function`, once after
+`Test Specification` — and pandas disambiguates re-occurring headers by
+appending `.1`, which `phase_columns` must reference explicitly to pick
+the intended one). Seeding a fully complete, unambiguous phase list for
+that file needs a human who understands the workbook's intended
+structure to confirm which column is which, rather than being safely
+inferable from the header text alone.
+
+See `docs/DATABASE.md` §11 (updated) for how a `team_import_configs` row
+now supports either mapping shape.
 
 ## 6. AI Chatbot Flow
 

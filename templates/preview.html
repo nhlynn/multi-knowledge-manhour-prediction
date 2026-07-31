@@ -999,7 +999,7 @@
 
         fetch('/export/excel', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': window.MHES.csrfToken()},
             body: JSON.stringify({ projectName: pName, createdBy: cBy, projectRemark: data.projectRemark || '', categories: categories })
         })
         .then(function(response) {
