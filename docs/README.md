@@ -205,7 +205,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open `http://localhost:3500` in your browser and log in (see "Authentication & Teams" in the root
+Open `http://localhost:4000` in your browser and log in (see "Authentication & Teams" in the root
 README for the default Admin account on a fresh install).
 
 See the root [README.md](../README.md) for full installation and running instructions

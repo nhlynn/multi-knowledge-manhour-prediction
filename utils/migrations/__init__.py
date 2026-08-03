@@ -47,6 +47,10 @@ no-ops if there is nothing to migrate (e.g. a fresh install):
    environment-specific pattern as #6, but for Development Team's Excel
    *export* column template (Phase 8 of multi-team support).
    (:mod:`utils.migrations.demo_seeds`)
+8. ``seed_default_teams`` — seeds the vendor default teams
+   (``DEFAULT_TEAMS``: Bamawl Team, SGL Team, KiKan Team, SSD Team) so a
+   fresh install has them without manual setup. Each is only inserted if
+   no team with that name already exists. (:mod:`utils.migrations.team_seed`)
 """
 
 from utils.migrations.demo_seeds import (
@@ -61,7 +65,9 @@ from utils.migrations.legacy_import import (
 from utils.migrations.team_seed import (
     DEFAULT_TEAM_NAME,
     DEFAULT_TEAM_SLUG,
+    DEFAULT_TEAMS,
     create_default_team,
+    seed_default_teams,
 )
 from utils.migrations.user_seed import (
     DEFAULT_ADMIN_ROLE,
@@ -78,6 +84,8 @@ __all__ = [
     "migrate_stashes_json_to_sqlite",
     "merge_legacy_databases_into_mhes",
     "create_default_team",
+    "DEFAULT_TEAMS",
+    "seed_default_teams",
     "migrate_kb_to_team_storage",
     "create_default_admin_user",
     "seed_development_team_import_config",

@@ -1,6 +1,7 @@
 """Application configuration for MHES."""
 
 import os
+from datetime import timedelta
 
 from dotenv import load_dotenv
 
@@ -36,6 +37,17 @@ class Config:
     # overrides this to True, since a production deployment should only
     # ever be served over https:// anyway.
     SESSION_COOKIE_SECURE: bool = False
+
+    # Persistent login: utils/auth.py::start_session() marks every
+    # session permanent, so the cookie carries this as its actual
+    # Max-Age/Expires instead of expiring only when the browser closes.
+    # Flask's own default (SESSION_REFRESH_EACH_REQUEST=True) re-issues
+    # that expiration on every response, so an active user's session
+    # keeps sliding forward and never hits this ceiling — it only
+    # matters for a genuinely idle browser left untouched this long.
+    PERMANENT_SESSION_LIFETIME: timedelta = timedelta(
+        days=int(os.environ.get("SESSION_LIFETIME_DAYS", "30"))
+    )
 
     # Folder paths
     UPLOAD_FOLDER: str = os.path.join(BASE_DIR, "uploads")
