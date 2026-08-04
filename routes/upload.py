@@ -19,6 +19,7 @@ from flask import (
     session,
     url_for,
 )
+from services.bamawl_import_parser import BamawlTemplateError, validate_bamawl_template
 from services.embedding_service import EmbeddingService
 from services.excel_service import ExcelService
 from services.kb_template_service import build_template_workbook as _build_template_workbook
@@ -27,6 +28,8 @@ from utils.permissions import require_roles
 from utils.team_storage import team_folders_for_team_id
 
 logger = logging.getLogger(__name__)
+
+_BAMAWL_TEAM_NAME = "Bamawl Team"
 
 upload_bp = Blueprint("upload", __name__)
 # Knowledge Base management is an Admin / Team Manager capability (see
@@ -72,6 +75,19 @@ def _team_column_mapping() -> dict[str, str] | None:
     repo = TeamImportConfigRepository(current_app.config["MHES_DB_PATH"])
     config = repo.get_by_team_id(session["team_id"])
     return config["column_mapping"] if config else None
+
+
+def _is_bamawl_team() -> bool:
+    """Return whether the current session's team is Bamawl Team.
+
+    Checked by name (not id/slug), matching how
+    ``utils/migrations/bamawl_import_export_config.py`` looks Bamawl
+    Team up — so this stays correct regardless of that team's id/slug.
+    """
+    from repositories.team_repository import TeamRepository
+
+    team = TeamRepository(current_app.config["MHES_DB_PATH"]).get_by_id(session["team_id"])
+    return team is not None and team["name"] == _BAMAWL_TEAM_NAME
 
 
 # ------------------------------------------------------------------
@@ -141,12 +157,34 @@ def upload_files() -> str:
         flash("No files selected.", "warning")
         return redirect(url_for("upload.upload_page"))
 
+    column_mapping = _team_column_mapping()
+
+    # Bamawl Team accepts only its own Excel template (see
+    # services/bamawl_import_parser.py) — validated here, before saving,
+    # so an invalid file is rejected outright with a clear message
+    # instead of being saved and only failing embedding later with a
+    # generic error. Every other team's upload flow is unaffected.
+    if _is_bamawl_team() and column_mapping:
+        accepted_files = []
+        for file in files:
+            if file.filename in (None, ""):
+                continue
+            try:
+                validate_bamawl_template(file.stream, column_mapping)
+                accepted_files.append(file)
+            except BamawlTemplateError as e:
+                logger.warning("Rejected '%s' for Bamawl Team: %s", file.filename, e)
+                flash(f"Rejected '{file.filename}': {e}", "danger")
+        files = accepted_files
+        if not files:
+            return redirect(url_for("upload.upload_page"))
+
     result = upload_and_embed_files(
         files,
         duplicate_action=duplicate_action,
         excel_service=_excel_service(),
         embedding_service=_embedding_service(),
-        column_mapping=_team_column_mapping(),
+        column_mapping=column_mapping,
     )
     for message in result.messages:
         flash(message.text, message.category)
@@ -197,9 +235,18 @@ def reembed_file(filename: str) -> str:
     emb = _embedding_service()
     svc = _excel_service()
     kb_path = svc.get_kb_path(filename)
+    column_mapping = _team_column_mapping()
+
+    if _is_bamawl_team() and column_mapping:
+        try:
+            validate_bamawl_template(kb_path, column_mapping)
+        except BamawlTemplateError as e:
+            logger.warning("Rejected re-embed of '%s' for Bamawl Team: %s", filename, e)
+            flash(f"Re-embedding failed: {e}", "danger")
+            return redirect(url_for("upload.upload_page"))
 
     try:
-        result = emb.process_excel_file(kb_path, column_mapping=_team_column_mapping())
+        result = emb.process_excel_file(kb_path, column_mapping=column_mapping)
         flash(
             f"Embeddings regenerated for '{filename}': "
             f"{result['num_vectors']} vectors.",

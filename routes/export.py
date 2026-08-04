@@ -31,6 +31,7 @@ from flask import (
     session,
     url_for,
 )
+from services.bamawl_export_builder import BamawlExportError, build_bamawl_workbook
 from services.export_detail_service import read_export_detail as _read_export_detail
 from services.export_history_service import ExportHistoryService
 from services.export_pipeline_service import (
@@ -57,6 +58,8 @@ export_bp = Blueprint("export", __name__)
 # Any logged-in role (Member and above) can export results.
 export_bp.before_request(require_login)
 
+_BAMAWL_TEAM_NAME = "Bamawl Team"
+
 
 def _team_id_filter() -> int | None:
     """Return the ``team_id`` to scope Export History reads to (Phase 6).
@@ -81,6 +84,41 @@ def _team_export_template() -> dict:
     repo = TeamExportTemplateRepository(current_app.config["MHES_DB_PATH"])
     config = repo.get_by_team_id(session["team_id"])
     return config["template_config"] if config else DEFAULT_EXPORT_TEMPLATE
+
+
+def _is_bamawl_team() -> bool:
+    """Return whether the current session's team is Bamawl Team.
+
+    Checked by name, matching ``routes/upload.py``'s helper of the same
+    name and how ``utils/migrations/bamawl_import_export_config.py``
+    looks Bamawl Team up.
+    """
+    from repositories.team_repository import TeamRepository
+
+    team = TeamRepository(current_app.config["MHES_DB_PATH"]).get_by_id(session["team_id"])
+    return team is not None and team["name"] == _BAMAWL_TEAM_NAME
+
+
+def _bamawl_import_column_mapping() -> dict | None:
+    """Return Bamawl Team's configured import column mapping.
+
+    The export builder reuses this (rather than a separate config) —
+    it already describes exactly which worksheet/columns
+    ``ALL_Detail``'s data lives in, the same mapping
+    ``services/bamawl_import_parser.py`` reads it with.
+    """
+    from repositories.team_import_config_repository import TeamImportConfigRepository
+
+    repo = TeamImportConfigRepository(current_app.config["MHES_DB_PATH"])
+    config = repo.get_by_team_id(session["team_id"])
+    return config["column_mapping"] if config else None
+
+
+def _bamawl_template_path() -> str:
+    """Path to Bamawl Team's real export template workbook."""
+    return os.path.join(
+        current_app.root_path, "simple_resource", "bamawl_import_export_format.xlsx",
+    )
 
 
 @export_bp.route("/excel", methods=["POST"])
@@ -113,13 +151,30 @@ def export_excel():
     os.makedirs(temp_dir, exist_ok=True)
     build_path = os.path.join(temp_dir, build_export_filename(safe_name))
 
+    bamawl_mapping = _bamawl_import_column_mapping() if _is_bamawl_team() else None
+
     try:
-        _build_workbook(
-            build_path, project_name, created_by, project_remark, categories,
-            template_config=_team_export_template(),
-        )
+        if bamawl_mapping:
+            # Bamawl Team exports onto its own real template workbook
+            # (see services/bamawl_export_builder.py) instead of the
+            # generic from-scratch column-layout builder every other
+            # team uses.
+            build_bamawl_workbook(
+                build_path, categories, bamawl_mapping, _bamawl_template_path(),
+            )
+        else:
+            _build_workbook(
+                build_path, project_name, created_by, project_remark, categories,
+                template_config=_team_export_template(),
+            )
         with open(build_path, "rb") as f:
             file_bytes = f.read()
+    except BamawlExportError as e:
+        # A specific, user-actionable problem (e.g. too many tasks for
+        # the template's fixed row block) -- surfaced directly rather
+        # than the generic 500 message below.
+        logger.warning("Bamawl export rejected for project=%r: %s", project_name, e)
+        return jsonify({"error": str(e)}), 400
     except Exception:
         # Logged with full traceback for diagnosis; the client only ever
         # gets a generic message — the underlying exception could

@@ -16,6 +16,7 @@ from utils.migrations import (
     merge_legacy_databases_into_mhes,
     migrate_kb_to_team_storage,
     migrate_stashes_json_to_sqlite,
+    seed_bamawl_import_export_config,
     seed_default_teams,
     seed_development_team_export_template,
     seed_development_team_import_config,
@@ -63,6 +64,11 @@ def create_app(config_name: str = "development") -> Flask:
     # manual setup. Each is only inserted if no team with that name
     # already exists (see utils/migrations/team_seed.py::seed_default_teams).
     seed_default_teams(app.config["MHES_DB_PATH"])
+    # Bamawl Team's own Import Template / Knowledge Parser / Export
+    # Template (see utils/migrations/bamawl_import_export_config.py).
+    # Must run after seed_default_teams -- looks Bamawl Team up by name.
+    # Does not affect any other team.
+    seed_bamawl_import_export_config(app.config["MHES_DB_PATH"])
     migrate_stashes_json_to_sqlite(app.config["TEMP_DATA_FOLDER"], app.config["MHES_DB_PATH"])
     merge_legacy_databases_into_mhes(
         legacy_temp_db_path=os.path.join(app.config["TEMP_DATA_FOLDER"], "temp_storage.db"),

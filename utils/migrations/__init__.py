@@ -51,8 +51,15 @@ no-ops if there is nothing to migrate (e.g. a fresh install):
    (``DEFAULT_TEAMS``: Bamawl Team, SGL Team, KiKan Team, SSD Team) so a
    fresh install has them without manual setup. Each is only inserted if
    no team with that name already exists. (:mod:`utils.migrations.team_seed`)
+9. ``seed_bamawl_import_export_config`` — seeds/corrects Bamawl Team's
+   own Import Template (phases-mode column mapping matching
+   ``simple_resource/bamawl_import_export_format_filled.xlsx``'s
+   ``ALL_Detail`` sheet) and Export Template. Only affects the team
+   named "Bamawl Team"; no other team's configuration is touched.
+   (:mod:`utils.migrations.bamawl_import_export_config`)
 """
 
+from utils.migrations.bamawl_import_export_config import seed_bamawl_import_export_config
 from utils.migrations.demo_seeds import (
     seed_development_team_export_template,
     seed_development_team_import_config,
@@ -86,6 +93,7 @@ __all__ = [
     "create_default_team",
     "DEFAULT_TEAMS",
     "seed_default_teams",
+    "seed_bamawl_import_export_config",
     "migrate_kb_to_team_storage",
     "create_default_admin_user",
     "seed_development_team_import_config",

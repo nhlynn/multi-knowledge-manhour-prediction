@@ -386,7 +386,15 @@ def _process_phases_sheet(
             every row). Optional ``total_column`` is used only as a
             sanity cross-check against the sum of matched phase columns
             — never stored, since the per-phase activities already carry
-            the real breakdown.
+            the real breakdown. Optional ``id_column``: a column that
+            must hold a real number for a row to count as a task row —
+            checked *before* ``task_column``'s forward-fill, so a
+            trailing summary/rollup block (blank or label-text id, but
+            numeric phase values, sometimes even its own non-blank
+            "task name") doesn't get silently folded into the last real
+            task above it. Rows are only skipped by this check if
+            ``id_column`` is configured — omitting it preserves the
+            exact prior behavior.
         all_categories: Accumulator, mutated in place (same shape
             ``_process_flat_sheet`` builds).
         sheet_name: For log messages only.
@@ -416,6 +424,7 @@ def _process_phases_sheet(
         return
 
     total_col = _find_column(columns, config.get("total_column"))
+    id_col = _find_column(columns, config.get("id_column"))
 
     if category_col:
         df[category_col] = df[category_col].ffill()
@@ -424,7 +433,7 @@ def _process_phases_sheet(
     for _, row in df.iterrows():
         _process_phases_row(
             row, task_col, category_col, fixed_category, phase_columns, total_col,
-            config, all_categories, sheet_name,
+            config, all_categories, sheet_name, id_col=id_col,
         )
 
 
@@ -459,11 +468,32 @@ def _process_phases_row(
     config: dict[str, Any],
     all_categories: dict[str, dict[str, Any]],
     sheet_name: str,
+    *,
+    id_col: str | None = None,
 ) -> None:
     """Fold one phases-mode Excel row into ``all_categories`` — every
     phase column with a nonzero value becomes its own Activity Detail
     under one Task.
     """
+    if id_col is not None:
+        id_val = row[id_col]
+        is_valid_id = not pd.isna(id_val)
+        if is_valid_id:
+            try:
+                float(id_val)
+            except (TypeError, ValueError):
+                is_valid_id = False
+        if not is_valid_id:
+            # A trailing summary/rollup block (e.g. a per-role subtotal
+            # table below the real task list) has a blank or non-numeric
+            # (label text) id but often still carries numeric
+            # phase-column values, sometimes even its own non-blank
+            # "task name" text -- checked before task_col's
+            # forward-fill below so neither is mistaken for a real task
+            # row. Only enforced when id_column is configured (see
+            # _process_phases_sheet).
+            return
+
     task = str(row[task_col]).strip() if pd.notna(row[task_col]) else ""
     if not task:
         # Rows with no task name are typically group-rollup/summary
