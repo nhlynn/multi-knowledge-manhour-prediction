@@ -20,6 +20,16 @@ template file (``simple_resource/bamawl_import_export_format.xlsx``):
   column each phase (Development, Code Review, ...) belongs in, the
   export-side mirror of how ``services/bamawl_import_parser.py`` reads
   that same sheet on the way in.
+- The ``FunctionList`` worksheet's "Function Name" column is
+  regenerated from that exact same task set (one row per ``ALL_Detail``
+  task, same "No." numbering) instead of being left as the template's
+  original sample function list — before this, every Bamawl export
+  shipped that fixed sample list regardless of which functions the user
+  had actually selected during the estimation workflow (chatbot
+  selection -> Preview), unrelated to the real, correctly-scoped
+  ``ALL_Detail`` data next to it. No other worksheet reads or depends
+  on ``FunctionList``'s contents (checked directly -- no cross-sheet
+  formula references it), so regenerating it has no effect elsewhere.
 
 **Known limitation** (a direct consequence of reusing this specific
 template file rather than building a fresh one): ``ALL_Detail`` has its
@@ -38,6 +48,7 @@ template's own built-in sample.
 
 import logging
 import os
+from copy import copy
 from typing import Any
 
 import openpyxl
@@ -45,6 +56,14 @@ import openpyxl
 from services.excel_parser import _find_column, _normalize_header, _safe_float
 
 logger = logging.getLogger(__name__)
+
+# FunctionList isn't part of Bamawl Team's import column_mapping (it's
+# an export-only, informational sheet in the template -- see module
+# docstring), so its sheet/column layout is fixed here instead.
+FUNCTION_LIST_SHEET = "FunctionList"
+FUNCTION_LIST_HEADER_ROW = 1
+FUNCTION_LIST_NO_COLUMN = 2  # "No."
+FUNCTION_LIST_NAME_COLUMN = 3  # "Function Name"
 
 
 class BamawlExportError(ValueError):
@@ -116,6 +135,60 @@ def _phase_value(activities: list[dict[str, Any]], label: str) -> float:
         if _normalize_header(act.get("task_detail") or "") == target:
             return _safe_float(act.get("estimate_hours"))
     return 0.0
+
+
+def _populate_function_list(wb, task_names: list[str]) -> None:
+    """Regenerate ``FunctionList``'s "Function Name" column from
+    exactly the given task names (one row per name, numbered 1..N) —
+    the user's selected functions, nothing more.
+
+    Missing or extra sample rows are handled without disturbing
+    formatting: rows within the template's original sample range keep
+    their existing cell style as-is (only the value changes); any row
+    needed beyond that range copies the style of the last original
+    sample row so a project with more functions than the template's
+    original sample count still looks consistent. Unused rows within
+    the original range are left blank (value cleared, formatting kept).
+
+    A missing ``FunctionList`` worksheet is not fatal — logged and
+    skipped, since it's an informational sheet rather than the
+    required ``ALL_Detail`` data (see ``build_bamawl_workbook``).
+    """
+    if FUNCTION_LIST_SHEET not in wb.sheetnames:
+        logger.warning(
+            "Bamawl Team's export template has no '%s' worksheet; skipping "
+            "Function Name list population.", FUNCTION_LIST_SHEET,
+        )
+        return
+
+    ws = wb[FUNCTION_LIST_SHEET]
+    data_start_row = FUNCTION_LIST_HEADER_ROW + 1
+    original_last_row = ws.max_row
+
+    for r in range(data_start_row, original_last_row + 1):
+        ws.cell(row=r, column=FUNCTION_LIST_NO_COLUMN).value = None
+        ws.cell(row=r, column=FUNCTION_LIST_NAME_COLUMN).value = None
+
+    style_row = max(original_last_row, data_start_row)
+    style_no = ws.cell(row=style_row, column=FUNCTION_LIST_NO_COLUMN)
+    style_name = ws.cell(row=style_row, column=FUNCTION_LIST_NAME_COLUMN)
+
+    for i, name in enumerate(task_names, start=1):
+        row = data_start_row + i - 1
+        no_cell = ws.cell(row=row, column=FUNCTION_LIST_NO_COLUMN, value=i)
+        name_cell = ws.cell(row=row, column=FUNCTION_LIST_NAME_COLUMN, value=name)
+        if row > original_last_row:
+            no_cell.font, no_cell.alignment, no_cell.border = (
+                copy(style_no.font), copy(style_no.alignment), copy(style_no.border),
+            )
+            name_cell.font, name_cell.alignment, name_cell.border = (
+                copy(style_name.font), copy(style_name.alignment), copy(style_name.border),
+            )
+
+    logger.info(
+        "Populated '%s' with %d selected function(s) (template originally had %d sample rows).",
+        FUNCTION_LIST_SHEET, len(task_names), max(original_last_row - data_start_row + 1, 0),
+    )
 
 
 def build_bamawl_workbook(
@@ -227,6 +300,8 @@ def build_bamawl_workbook(
             "column and were left out of '%s': %s",
             len(unmatched_labels), sheet_name, sorted(unmatched_labels),
         )
+
+    _populate_function_list(wb, [task.get("task", "") for task in tasks])
 
     wb.save(filepath)
     logger.info(
