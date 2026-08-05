@@ -32,7 +32,6 @@ from flask import (
     url_for,
 )
 from services.bamawl_export_builder import BamawlExportError, build_bamawl_workbook
-from services.export_detail_service import read_export_detail as _read_export_detail
 from services.export_history_service import ExportHistoryService
 from services.export_pipeline_service import (
     build_export_filename,
@@ -105,7 +104,7 @@ def _bamawl_import_column_mapping() -> dict | None:
     The export builder reuses this (rather than a separate config) —
     it already describes exactly which worksheet/columns
     ``ALL_Detail``'s data lives in, the same mapping
-    ``services/bamawl_import_parser.py`` reads it with.
+    ``services/team_template_validator.py`` reads it with.
     """
     from repositories.team_import_config_repository import TeamImportConfigRepository
 
@@ -115,9 +114,17 @@ def _bamawl_import_column_mapping() -> dict | None:
 
 
 def _bamawl_template_path() -> str:
-    """Path to Bamawl Team's real export template workbook."""
+    """Path to Bamawl Team's single official Excel template.
+
+    ``bamawl_import_export_format_filled.xlsx`` is the one workbook
+    used for both import (``services/team_template_validator.py`` accepts
+    an upload structurally matching it) and export (this builds
+    directly on top of it) -- there is deliberately no separate
+    import-only or export-only template file (see
+    ``services/bamawl_export_builder.py`` module docstring).
+    """
     return os.path.join(
-        current_app.root_path, "simple_resource", "bamawl_import_export_format.xlsx",
+        current_app.root_path, "simple_resource", "bamawl_import_export_format_filled.xlsx",
     )
 
 
@@ -161,6 +168,7 @@ def export_excel():
             # team uses.
             build_bamawl_workbook(
                 build_path, categories, bamawl_mapping, _bamawl_template_path(),
+                project_name=project_name,
             )
         else:
             _build_workbook(
@@ -422,44 +430,82 @@ def download_export(filename: str):
     return redirect(signed_url)
 
 
-@export_bp.route("/files/<filename>/view", methods=["GET"])
-def view_export(filename: str) -> str:
-    """Render a read-only in-browser detail view of an exported file.
+def _resolve_export_file_or_404(filename: str):
+    """Look up an export's history record and confirm its file actually
+    exists, for the two read-only "view" endpoints below.
 
-    Reads the workbook from GCS (post-migration exports) or local disk
-    (pre-migration exports), based on the export_history row's file_path —
-    same local-vs-GCS distinction as ``download_export``.
+    Returns:
+        ``(record, file_path)`` on success, or ``(None, None)`` --
+        callers translate that into whatever not-found response fits
+        their route (a flashed redirect for the HTML page, a JSON 404
+        for the raw-bytes endpoint).
     """
     if not _is_safe_export_filename(filename):
-        flash(f"File not found: {filename}", "warning")
-        return redirect(url_for("export.list_exports"))
-
+        return None, None
     record = _export_history_service().get_history_by_file_name(filename, team_id=_team_id_filter())
     if record is None:
         # Either the file truly doesn't exist, or it belongs to another
         # team (Phase 6) — treated identically as "not found".
+        return None, None
+    file_path = record.get("file_path") or os.path.join(_export_folder(), filename)
+    if is_local_path(file_path) and not os.path.isfile(file_path):
+        return None, None
+    return record, file_path
+
+
+@export_bp.route("/files/<filename>/view", methods=["GET"])
+def view_export(filename: str) -> str:
+    """Render the online Excel Preview page for an exported file.
+
+    The page itself only needs the project name (for its header) and
+    the filename -- the actual workbook is fetched and rendered
+    entirely client-side (see ``export_file_raw`` below and
+    ``templates/export_detail.html``'s script), so this route never
+    reads the file's content, and nothing here can modify it.
+    """
+    record, _file_path = _resolve_export_file_or_404(filename)
+    if record is None:
         flash(f"File not found: {filename}", "warning")
         return redirect(url_for("export.list_exports"))
 
-    file_path = record.get("file_path") or os.path.join(_export_folder(), filename)
+    return render_template(
+        "export_detail.html", filename=filename, project_name=record.get("project_name") or filename,
+    )
+
+
+@export_bp.route("/files/<filename>/raw", methods=["GET"])
+def export_file_raw(filename: str):
+    """Serve an exported workbook's raw bytes for the online Excel
+    Preview to fetch and render client-side (see
+    ``templates/export_detail.html``).
+
+    Served ``as_attachment=False`` (inline) and only ever fetched via
+    JavaScript (never a top-level browser navigation), so this never
+    triggers a download/Save-As prompt — the workbook is displayed, not
+    downloaded. Purely a read: nothing here writes back to the file,
+    the export_history row, or anywhere else.
+    """
+    record, file_path = _resolve_export_file_or_404(filename)
+    if record is None:
+        return jsonify({"error": f"File not found: {filename}"}), 404
 
     try:
         if is_local_path(file_path):
-            if not os.path.isfile(file_path):
-                flash(f"File not found: {filename}", "warning")
-                return redirect(url_for("export.list_exports"))
-            detail = _read_export_detail(file_path)
+            with open(file_path, "rb") as f:
+                file_bytes = f.read()
         else:
             file_bytes = download_excel_bytes(file_path)
-            detail = _read_export_detail(io.BytesIO(file_bytes))
     except GCSError:
-        logger.exception("Failed to download export file from GCS for '%s'.", filename)
-        flash(f"Could not open '{filename}' for viewing. Please try again.", "danger")
-        return redirect(url_for("export.list_exports"))
+        logger.exception("Failed to download export file from GCS for preview: %s", filename)
+        return jsonify({"error": "Could not load the file for preview. Please try again."}), 502
     except Exception:
-        logger.exception("Failed to read export detail for '%s'.", filename)
-        flash(f"Could not open '{filename}' for viewing. Please try again.", "danger")
-        return redirect(url_for("export.list_exports"))
+        logger.exception("Failed to read export file for preview: %s", filename)
+        return jsonify({"error": "Could not load the file for preview. Please try again."}), 500
 
-    return render_template("export_detail.html", filename=filename, **detail)
+    return send_file(
+        io.BytesIO(file_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=False,
+        download_name=filename,
+    )
 

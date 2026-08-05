@@ -206,7 +206,7 @@
                                 <td class="text-end">
                                     {% if f.file_exists %}
                                     <div class="export-actions">
-                                        <a href="{{ url_for('export.view_export', filename=f.file_name) }}" class="btn btn-sm btn-outline-secondary btn-icon mhes-view-link" title="View details">
+                                        <a href="{{ url_for('export.view_export', filename=f.file_name) }}" class="btn btn-sm btn-outline-secondary btn-icon mhes-view-link" title="View Excel">
                                             <i class="bi bi-eye"></i>
                                         </a>
                                         <a href="{{ f.file_url or url_for('export.download_export', filename=f.file_name) }}" class="btn btn-sm btn-outline-primary btn-icon mhes-download-link" title="Download">

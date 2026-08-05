@@ -948,8 +948,13 @@
         saveData();
 
         if (categories.length === 0) {
+            // Same "go empty" path clearAllBtn already uses -- switches
+            // to the empty state directly instead of a full page
+            // reload, so the Grand Total's transition to "nothing left"
+            // happens immediately like every other removal, not via a
+            // page refresh.
             sessionStorage.removeItem('previewData');
-            location.reload();
+            showEmpty();
             return;
         }
 

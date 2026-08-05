@@ -54,6 +54,25 @@
                             <small class="text-muted ms-2">You can add more files at any time.</small>
                         </div>
                     </div>
+                    <!-- Template validation error: shown inline (no page
+                         reload) when a selected file doesn't match Bamawl
+                         Team's official template. The rejected file is
+                         never added to the Selected Files list below, so
+                         the user can immediately pick a different one. -->
+                    <div id="templateValidationAlert" class="alert alert-danger d-none" role="alert">
+                        <div class="d-flex align-items-start">
+                            <i class="bi bi-exclamation-octagon-fill me-2 mt-1"></i>
+                            <div id="templateValidationMessage" class="flex-grow-1"></div>
+                        </div>
+                        <div class="mt-2">
+                            <a href="{{ url_for('upload.download_template') }}" class="btn btn-sm btn-outline-danger">
+                                <i class="bi bi-download me-1"></i>Download Latest Template
+                            </a>
+                            <button type="button" class="btn btn-sm btn-outline-secondary ms-1" id="dismissTemplateAlert">
+                                Choose Another File
+                            </button>
+                        </div>
+                    </div>
                     <!-- Selected file list with remove buttons -->
                     <div id="fileListContainer" class="mb-3" style="display:none;">
                         <label class="form-label fw-semibold">
@@ -220,9 +239,69 @@
         return /\.xlsx$/i.test(file.name);
     }
 
+    var templateValidationAlert = document.getElementById('templateValidationAlert');
+    var templateValidationMessage = document.getElementById('templateValidationMessage');
+
+    function showTemplateValidationAlert(message, reason) {
+        templateValidationMessage.textContent = reason ? (message + ' (' + reason + ')') : message;
+        templateValidationAlert.classList.remove('d-none');
+    }
+
+    function hideTemplateValidationAlert() {
+        templateValidationAlert.classList.add('d-none');
+    }
+
+    document.getElementById('dismissTemplateAlert').addEventListener('click', function() {
+        // Purely dismisses the inline alert so the user can pick another
+        // file right away -- no navigation, no page reload.
+        hideTemplateValidationAlert();
+        browseBtn.click();
+    });
+
+    // Validates one candidate file against the current team's official
+    // template (a no-op, always-valid response for every team except
+    // Bamawl -- see routes/upload.py::validate_template) before it's
+    // added to the Selected Files list. Runs candidates one at a time
+    // so each gets its own clear pass/fail outcome and the alert (if
+    // shown) reflects exactly one specific file.
+    function validateCandidatesSequentially(candidates) {
+        if (candidates.length === 0) {
+            renderFileList();
+            return;
+        }
+        var file = candidates[0];
+        var rest = candidates.slice(1);
+        var formData = new FormData();
+        formData.append('files', file);
+
+        fetch('{{ url_for("upload.validate_template") }}', {
+            method: 'POST',
+            headers: {'X-CSRFToken': window.MHES.csrfToken()},
+            body: formData
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.valid === false) {
+                showTemplateValidationAlert(data.message, data.reason);
+            } else {
+                selectedFiles.push({ id: nextId++, file: file });
+            }
+        })
+        .catch(function() {
+            // Pre-check itself failed (e.g. network hiccup) -- don't
+            // block the user on this optional UX improvement; the
+            // server re-validates for real at submit time regardless.
+            selectedFiles.push({ id: nextId++, file: file });
+        })
+        .then(function() {
+            validateCandidatesSequentially(rest);
+        });
+    }
+
     function onFilesSelected() {
         var newFiles = fileInput.files;
         var rejected = [];
+        var candidates = [];
         for (var i = 0; i < newFiles.length; i++) {
             var f = newFiles[i];
             if (!isValidExcelFile(f)) {
@@ -233,7 +312,7 @@
                 return s.file.name === f.name && s.file.size === f.size;
             });
             if (!exists) {
-                selectedFiles.push({ id: nextId++, file: f });
+                candidates.push(f);
             }
         }
         if (rejected.length > 0) {
@@ -242,7 +321,8 @@
                 rejected.join(', ')
             );
         }
-        renderFileList();
+        hideTemplateValidationAlert();
+        validateCandidatesSequentially(candidates);
     }
     fileInput.addEventListener('change', onFilesSelected);
 

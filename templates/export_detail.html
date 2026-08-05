@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ project_name }} — Export Detail{% endblock %}
+{% block title %}{{ project_name }} — Excel Preview{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -20,14 +20,13 @@
     }
     .export-header-actions .btn:hover { transform: translateY(-1px); }
     .export-header-actions .btn:focus-visible,
-    .remark-hyperlink:focus-visible,
-    .export-table a:focus-visible {
+    .sheet-tab:focus-visible {
         outline: 2px solid var(--accent, #6366f1);
         outline-offset: 2px;
         border-radius: 6px;
     }
 
-    /* ---------- Section cards ---------- */
+    /* ---------- Preview card ---------- */
     .preview-section-card {
         border-radius: 14px !important; overflow: hidden;
         border: 1px solid var(--border, #e2e8f0) !important;
@@ -36,148 +35,85 @@
     .preview-section-card > .card-header {
         background: #ffffff !important;
         border-bottom: 1px solid var(--border-light, #f1f5f9) !important;
-        padding: 0.875rem 1.375rem !important;
+        padding: 0.625rem 1rem !important;
+        display: flex; align-items: center; gap: 0.375rem;
+        flex-wrap: wrap;
+    }
+
+    /* ---------- Sheet tabs ---------- */
+    .sheet-tab {
+        border: 1px solid var(--border, #e2e8f0);
+        background: #f8fafc;
+        color: var(--text-secondary, #64748b);
+        font-size: 0.8rem;
+        font-weight: 600;
+        padding: 0.35rem 0.85rem;
+        border-radius: 8px;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    .sheet-tab:hover { background: #eef1f8; color: var(--text-primary, #0f172a); }
+    .sheet-tab.active {
+        background: var(--accent, #6366f1);
+        border-color: var(--accent, #6366f1);
+        color: #fff;
+    }
+
+    /* ---------- Viewer toolbar ---------- */
+    .viewer-toolbar {
         display: flex; align-items: center; justify-content: space-between;
+        gap: 0.75rem; flex-wrap: wrap;
+        padding: 0.625rem 1rem;
+        background: #ffffff;
+        border-bottom: 1px solid var(--border-light, #f1f5f9);
     }
-    .preview-section-card > .card-header h5 {
-        font-size: 0.9rem; font-weight: 600; color: var(--text-primary, #0f172a);
-        letter-spacing: -0.01em; display: flex; align-items: center; gap: 0.45rem;
+    .viewer-toolbar-sheets {
+        display: flex; align-items: center; gap: 0.375rem; flex-wrap: wrap;
+        overflow-x: auto;
     }
-    .preview-section-card > .card-header h5 i { color: var(--accent, #6366f1); font-size: 0.95rem; }
-    .preview-section-card > .card-body { padding: 1.25rem !important; }
+    .viewer-toolbar-controls { display: flex; align-items: center; gap: 0.375rem; flex-shrink: 0; }
+    .viewer-zoom-level {
+        font-size: 0.78rem; font-weight: 600; color: var(--text-secondary, #64748b);
+        min-width: 3.2rem; text-align: center; user-select: none;
+    }
+    .viewer-toolbar-controls .btn { display: inline-flex; align-items: center; gap: 0.3rem; }
 
-    /* ---------- Project information grid ---------- */
-    .meta-strip {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: 1.25rem 2rem;
-    }
-    .meta-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-    .meta-label {
-        font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
-        letter-spacing: 0.6px; color: var(--text-tertiary, #94a3b8);
-    }
-    .meta-val {
-        font-size: 0.95rem; font-weight: 600; color: var(--text-primary, #0f172a);
-        overflow-wrap: anywhere;
-    }
-
-    /* ---------- Selected Data table ---------- */
-    .export-table-wrap {
+    /* ---------- Rendered workbook table ---------- */
+    .excel-preview-wrap {
         border: 1px solid var(--border, #e2e8f0);
         border-radius: 12px;
         overflow: auto;
-        max-height: 70vh;
+        max-height: 75vh;
+        background: #fff;
     }
-    table.export-table {
-        margin-bottom: 0;
-        border-collapse: separate;
-        border-spacing: 0;
-        font-size: 0.875rem;
+    .excel-preview-wrap table {
+        border-collapse: collapse;
+        font-size: 0.82rem;
+        table-layout: fixed;
     }
-    table.export-table thead th {
-        position: sticky;
-        top: 0;
-        z-index: 2;
-        background: #1e2433;
-        color: #fff;
-        font-weight: 600;
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        padding: 0.75rem 1rem;
-        border: none;
-        white-space: nowrap;
+    .excel-preview-wrap table td,
+    .excel-preview-wrap table th {
+        border: 1px solid #e2e8f0;
+        padding: 0.35rem 0.6rem;
+        vertical-align: top;
+        /* pre-wrap: keeps literal newlines in a cell's stored text
+           (common in these workbooks' wrapped headers) while still
+           wrapping long lines instead of overflowing a fixed-width
+           column. */
+        white-space: pre-wrap;
+        overflow-wrap: break-word;
     }
-    table.export-table thead th:first-child { border-top-left-radius: 12px; }
-    table.export-table thead th:last-child { border-top-right-radius: 12px; }
+    .excel-preview-wrap table tr:nth-child(odd) td { background-color: #ffffff; }
+    .excel-preview-wrap table tr:nth-child(even) td { background-color: #f8fafc; }
 
-    table.export-table tbody td {
-        padding: 0.7rem 1rem;
-        border-bottom: 1px solid var(--border-light, #f1f5f9);
-        color: var(--text-primary, #0f172a);
-        vertical-align: middle;
-    }
-    table.export-table tbody tr:last-child td { border-bottom: none; }
-
-    /* zebra striping (excluding the total row) */
-    table.export-table tbody tr.data-row:nth-of-type(odd) { background-color: #ffffff; }
-    table.export-table tbody tr.data-row:nth-of-type(even) { background-color: var(--surface-secondary, #f8fafc); }
-    table.export-table tbody tr.data-row:hover td { background-color: var(--accent-light, rgba(99,102,241,0.08)); }
-
-    .export-table .cat-cell {
-        font-weight: 700;
-        color: var(--text-primary, #0f172a);
-        background-color: #eef1f8 !important;
-        border-right: 1px solid var(--border, #e2e8f0);
+    .excel-preview-status {
+        display: flex; align-items: center; justify-content: center;
+        min-height: 220px; color: var(--text-secondary, #64748b); font-size: 0.9rem;
+        flex-direction: column; gap: 0.75rem;
     }
 
-    .export-table .num-col { text-align: right; font-variant-numeric: tabular-nums; }
-
-    .export-table .total-row td {
-        background: #d9e1f2 !important;
-        font-weight: 700;
-        color: #1e2a4a;
-        border-top: 2px solid #b9c6e6;
-        font-size: 0.9rem;
-    }
-
-    /* ---------- Remark ---------- */
-    .remark-box {
-        border: 1px solid var(--border, #e2e8f0);
-        border-radius: 10px;
-        padding: 1.1rem 1.35rem;
-        font-size: 0.9rem;
-        color: #1e293b;
-        line-height: 1.7;
-        white-space: normal;
-    }
-    .remark-box p:last-child { margin-bottom: 0; }
-    .remark-hyperlink {
-        font-size: 0.8rem;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.25rem;
-    }
-
-    /* ---------- Print ---------- */
     @media print {
-        .export-header-actions,
-        .app-sidebar,
-        .app-topbar,
-        .no-print {
-            display: none !important;
-        }
-        body, .app-content, .container-fluid {
-            margin: 0 !important;
-            padding: 0 !important;
-        }
-        .preview-section-card {
-            box-shadow: none !important;
-            border: 1px solid #d0d0d0 !important;
-            break-inside: avoid;
-            page-break-inside: avoid;
-        }
-        .export-table-wrap {
-            max-height: none !important;
-            overflow: visible !important;
-        }
-        table.export-table thead th {
-            position: static;
-            background: #1e2433 !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-        }
-        table.export-table tr {
-            break-inside: avoid;
-            page-break-inside: avoid;
-        }
-        .export-table .total-row td,
-        .export-table .cat-cell {
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-        }
-        @page { size: A4; margin: 14mm; }
+        .export-header-actions, .app-sidebar, .app-topbar, .no-print { display: none !important; }
     }
 </style>
 {% endblock %}
@@ -189,91 +125,15 @@
             <i class="bi bi-file-earmark-excel me-2 text-muted" style="font-size:1rem;" aria-hidden="true"></i>
             <span>{{ project_name }}</span>
         </h2>
-        <p class="preview-page-sub">Read-only view of {{ filename }}.</p>
+        <p class="preview-page-sub">Online preview of {{ filename }} — read-only.</p>
     </div>
     <div class="col-auto">
         <div class="export-header-actions no-print">
-            <a href="{{ url_for('export.download_export', filename=filename) }}"
-               class="btn btn-success btn-sm mhes-download-link"
-               aria-label="Download {{ filename }} as Excel file">
-                <i class="bi bi-download" aria-hidden="true"></i>Download Excel
-            </a>
-            <!-- <a href="{{ url_for('export.list_exports') }}"
+            <a href="{{ url_for('export.list_exports') }}"
                class="btn btn-outline-primary btn-sm"
                aria-label="Back to Export History">
                 <i class="bi bi-arrow-left" aria-hidden="true"></i>Back to Export History
-            </a> -->
-        </div>
-    </div>
-</div>
-
-<div class="row mb-4">
-    <div class="col">
-        <div class="card preview-section-card">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-info-circle" aria-hidden="true"></i>Project Information</h5>
-            </div>
-            <div class="card-body">
-                <div class="meta-strip">
-                    <div class="meta-item">
-                        <span class="meta-label" id="meta-label-project">Project Name</span>
-                        <span class="meta-val" aria-labelledby="meta-label-project">{{ project_name }}</span>
-                    </div>
-                    <div class="meta-item">
-                        <span class="meta-label" id="meta-label-createdby">Created By</span>
-                        <span class="meta-val" aria-labelledby="meta-label-createdby">{{ created_by or '-' }}</span>
-                    </div>
-                    <div class="meta-item">
-                        <span class="meta-label" id="meta-label-date">Created Date</span>
-                        <span class="meta-val" aria-labelledby="meta-label-date">{{ date_str or '-' }}</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="row mb-4">
-    <div class="col">
-        <div class="card preview-section-card">
-            <div class="card-header"><h5 class="mb-0"><i class="bi bi-table" aria-hidden="true"></i>Selected Data</h5></div>
-            <div class="card-body">
-                <div class="export-table-wrap">
-                    <table class="table export-table" aria-label="Selected task data with estimates">
-                        <caption class="visually-hidden">Selected categories, tasks, estimated hours, working days and remarks</caption>
-                        <thead>
-                            <tr>
-                                <th scope="col">Category</th>
-                                <th scope="col">Task List</th>
-                                <th scope="col" class="num-col">Estimate (Hours)</th>
-                                <th scope="col" class="num-col">Working Day</th>
-                                <th scope="col">Remarks</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for cat in categories %}
-                                {% for row in cat.rows %}
-                                <tr class="data-row">
-                                    {% if loop.first %}
-                                    <td rowspan="{{ cat.rows|length }}" class="cat-cell">{{ cat.name }}</td>
-                                    {% endif %}
-                                    <td>{{ row.task }}</td>
-                                    <td class="num-col">{{ row.estimate }}</td>
-                                    <td class="num-col">{{ row.working_day }}</td>
-                                    <td>{{ row.remarks }}</td>
-                                </tr>
-                                {% endfor %}
-                            {% endfor %}
-                            <tr class="total-row">
-                                <td colspan="2">Total</td>
-                                <td class="num-col">{{ grand_total }}</td>
-                                <td class="num-col">{{ grand_working_day }}</td>
-                                <td></td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+            </a>
         </div>
     </div>
 </div>
@@ -281,17 +141,35 @@
 <div class="row">
     <div class="col">
         <div class="card preview-section-card">
-            <div class="card-header"><h5 class="mb-0"><i class="bi bi-chat-square-text" aria-hidden="true"></i>Remark</h5></div>
-            <div class="card-body">
-                <div class="remark-box" style="{% if remark_bg %}background-color: {{ remark_bg }};{% endif %}">
-                    {{ remark_html | safe }}
+            <div class="viewer-toolbar no-print">
+                <div class="viewer-toolbar-sheets" id="sheetTabs" aria-label="Sheet navigation">
+                    <!-- One button per worksheet, populated once the workbook loads -->
                 </div>
-                {% if remark_hyperlink %}
-                <p class="mt-2 mb-0 remark-hyperlink">
-                    <i class="bi bi-link-45deg" aria-hidden="true"></i>
-                    <a href="{{ remark_hyperlink }}" target="_blank" rel="noopener noreferrer">{{ remark_hyperlink }}</a>
-                </p>
-                {% endif %}
+                <div class="viewer-toolbar-controls">
+                    <a href="{{ url_for('export.download_export', filename=filename) }}"
+                       class="btn btn-success btn-sm mhes-download-link"
+                       aria-label="Download {{ filename }} as Excel file">
+                        <i class="bi bi-download" aria-hidden="true"></i>Download Excel
+                    </a>
+                    <div class="vr mx-1"></div>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="zoomOutBtn" aria-label="Zoom out">
+                        <i class="bi bi-zoom-out" aria-hidden="true"></i>
+                    </button>
+                    <span class="viewer-zoom-level" id="zoomLevelLabel">100%</span>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="zoomInBtn" aria-label="Zoom in">
+                        <i class="bi bi-zoom-in" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="fitWidthBtn" aria-label="Fit to width">
+                        <i class="bi bi-arrows-angle-expand" aria-hidden="true"></i>Fit Width
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div id="excelPreviewStatus" class="excel-preview-status">
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    <span>Loading workbook…</span>
+                </div>
+                <div id="excelPreviewWrap" class="excel-preview-wrap d-none"></div>
             </div>
         </div>
     </div>
@@ -299,6 +177,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 (function() {
     // Download resolves to a redirect to a signed GCS URL; the browser
@@ -310,6 +189,166 @@
             window.MHES.showLoading('Preparing download...', 4000);
         });
     }
+
+    // --- Online Excel Preview ---
+    // Fetches the workbook's raw bytes (never a browser download -- the
+    // response has no attachment disposition, and this is a background
+    // fetch, not a top-level navigation) and renders each sheet as an
+    // HTML table via SheetJS, entirely client-side. The exported file
+    // itself is never written to in any way -- this only ever reads it.
+    var tabsEl = document.getElementById('sheetTabs');
+    var statusEl = document.getElementById('excelPreviewStatus');
+    var wrapEl = document.getElementById('excelPreviewWrap');
+    var zoomOutBtn = document.getElementById('zoomOutBtn');
+    var zoomInBtn = document.getElementById('zoomInBtn');
+    var fitWidthBtn = document.getElementById('fitWidthBtn');
+    var zoomLevelLabel = document.getElementById('zoomLevelLabel');
+    var workbook = null;
+    var activeSheetName = null;
+    var zoomLevel = 1; // 1 = 100%, applied via CSS zoom on the table itself
+
+    var ZOOM_MIN = 0.3;
+    var ZOOM_MAX = 3;
+    var ZOOM_STEP = 0.1;
+
+    // Applies the current zoom level to whichever table is on screen
+    // right now (view-only: this scales the rendered table, it never
+    // touches the underlying data/cells in any way).
+    function applyZoom() {
+        var table = wrapEl.querySelector('table');
+        if (table) table.style.zoom = zoomLevel;
+        zoomLevelLabel.textContent = Math.round(zoomLevel * 100) + '%';
+    }
+
+    function setZoom(level) {
+        zoomLevel = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, level));
+        applyZoom();
+    }
+
+    zoomOutBtn.addEventListener('click', function() { setZoom(zoomLevel - ZOOM_STEP); });
+    zoomInBtn.addEventListener('click', function() { setZoom(zoomLevel + ZOOM_STEP); });
+
+    // Fit Width: measure the table at 100% zoom, then pick whatever
+    // zoom level makes its natural width match the visible viewer area
+    // -- so the whole sheet's columns fit without a horizontal
+    // scrollbar (never wider than 100%, so a naturally-narrow sheet
+    // isn't stretched beyond its real size).
+    fitWidthBtn.addEventListener('click', function() {
+        var table = wrapEl.querySelector('table');
+        if (!table) return;
+        var previousZoom = table.style.zoom;
+        table.style.zoom = 1;
+        var naturalWidth = table.scrollWidth;
+        table.style.zoom = previousZoom;
+        if (!naturalWidth) return;
+        var availableWidth = wrapEl.clientWidth - 4; // small margin for the border
+        setZoom(Math.min(1, availableWidth / naturalWidth));
+    });
+
+    function showStatus(message, isError) {
+        wrapEl.classList.add('d-none');
+        statusEl.classList.remove('d-none');
+        statusEl.innerHTML = isError
+            ? '<i class="bi bi-exclamation-triangle text-danger" style="font-size:1.5rem;"></i><span>' + message + '</span>'
+            : '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span><span>' + message + '</span>';
+    }
+
+    // Applies the sheet's own column widths (ws['!cols']) and row
+    // heights (ws['!rows']) to the table sheet_to_html just produced --
+    // that helper renders values/merges/order correctly but emits no
+    // sizing information of its own, so this is a best-effort pass on
+    // top of it ("display ... where possible": a column/row with no
+    // explicit width/height in the source file is left at the
+    // browser's natural size, exactly as Excel itself would leave an
+    // unset column at its default width).
+    function applySizing(table, sheet) {
+        var range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
+        var cols = sheet['!cols'] || [];
+        var rows = sheet['!rows'] || [];
+
+        var colgroup = document.createElement('colgroup');
+        for (var c = range.s.c; c <= range.e.c; c++) {
+            var col = document.createElement('col');
+            var meta = cols[c];
+            if (meta && meta.wpx) {
+                col.style.width = meta.wpx + 'px';
+            }
+            colgroup.appendChild(col);
+        }
+        table.insertBefore(colgroup, table.firstChild);
+
+        // sheet_to_html emits bare <table><tr>...</tr></table> markup,
+        // but the browser's HTML parser silently wraps those <tr>
+        // elements in an implicit <tbody> once assigned via innerHTML
+        // -- so a direct-child (":scope > tr") selector finds nothing.
+        // "table tr" reaches them regardless of that implicit wrapper.
+        var trs = table.querySelectorAll("tr");
+        trs.forEach(function(tr, i) {
+            var meta = rows[range.s.r + i];
+            if (meta && meta.hpx) {
+                tr.style.height = meta.hpx + 'px';
+            }
+        });
+    }
+
+    function renderSheet(sheetName) {
+        activeSheetName = sheetName;
+        Array.prototype.forEach.call(tabsEl.querySelectorAll('.sheet-tab'), function(btn) {
+            btn.classList.toggle('active', btn.dataset.sheet === sheetName);
+        });
+        var sheet = workbook.Sheets[sheetName];
+        var html = XLSX.utils.sheet_to_html(sheet, {editable: false});
+        wrapEl.innerHTML = html;
+        // sheet_to_html emits its own <table>; strip any stray editable
+        // affordances just in case a future SheetJS version adds any.
+        wrapEl.querySelectorAll('[contenteditable]').forEach(function(el) {
+            el.removeAttribute('contenteditable');
+        });
+        var table = wrapEl.querySelector('table');
+        if (table) applySizing(table, sheet);
+        applyZoom();
+        statusEl.classList.add('d-none');
+        wrapEl.classList.remove('d-none');
+    }
+
+    function buildTabs(sheetNames) {
+        tabsEl.innerHTML = '';
+        sheetNames.forEach(function(name) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'sheet-tab';
+            btn.dataset.sheet = name;
+            btn.textContent = name;
+            btn.addEventListener('click', function() { renderSheet(name); });
+            tabsEl.appendChild(btn);
+        });
+    }
+
+    fetch('{{ url_for("export.export_file_raw", filename=filename) }}')
+        .then(function(response) {
+            if (!response.ok) {
+                return response.json().then(function(d) {
+                    throw new Error(d.error || 'Failed to load the workbook.');
+                });
+            }
+            return response.arrayBuffer();
+        })
+        .then(function(buffer) {
+            // cellStyles: true is required for SheetJS to populate
+            // '!cols'/'!rows' (column widths / row heights) at all --
+            // without it those come back undefined even when the
+            // source file has them.
+            workbook = XLSX.read(buffer, {type: 'array', cellStyles: true});
+            if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+                showStatus('This workbook has no worksheets to preview.', true);
+                return;
+            }
+            buildTabs(workbook.SheetNames);
+            renderSheet(workbook.SheetNames[0]);
+        })
+        .catch(function(err) {
+            showStatus(err.message || 'Failed to load the workbook for preview.', true);
+        });
 })();
 </script>
 {% endblock %}

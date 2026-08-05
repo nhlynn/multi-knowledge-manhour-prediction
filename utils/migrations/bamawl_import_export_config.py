@@ -3,10 +3,14 @@
 Seeds (or corrects) the ``team_import_configs``/``team_export_templates``
 rows for "Bamawl Team" so its Excel Knowledge Base upload (matching
 ``simple_resource/bamawl_import_export_format_filled.xlsx``'s
-``ALL_Detail`` sheet) parses via "phases mode"
-(``services/excel_parser.py``, see ``docs/ARCHITECTURE.md`` §5i) instead
-of the generic flat category/task/detail/estimate mapping, and its
-exports use the standard column layout.
+``ALL_Detail`` sheet -- Bamawl Team's single official workbook, used
+for both import and export, see ``services/bamawl_export_builder.py``)
+parses via "phases mode" (``services/excel_parser.py``, see
+``docs/ARCHITECTURE.md`` §5i) instead of the generic flat
+category/task/detail/estimate mapping. The same ``column_mapping``
+seeded here is reused directly by
+``services/bamawl_export_builder.py`` to know where each phase column
+lives when building an export back onto that same template.
 
 Looked up by team **name** ("Bamawl Team"), not slug -- the slug value
 itself is Team Management's concern (``utils/migrations/team_seed.py``),
@@ -33,7 +37,58 @@ _BAMAWL_CONFIG_MIGRATION_NAME = "seed_bamawl_import_export_config_v1"
 
 BAMAWL_TEAM_NAME = "Bamawl Team"
 
-# Phases-mode column mapping for simple_resource/bamawl_import_export_format*.xlsx's
+# The official template's full worksheet list, in order -- used (via
+# _build_bamawl_template_spec below and services/team_template_registry.py)
+# by services/team_template_validator.py to validate that an uploaded
+# workbook has every required sheet (not just ALL_Detail) before
+# import is attempted at all.
+BAMAWL_REQUIRED_SHEET_NAMES: list[str] = [
+    "ReqDefinition",
+    "FunctionList",
+    "TotalManhour",
+    "ALL_Detail",
+    "Infra Manhour",
+    "Business Flow(system admin)",
+    "Milestone",
+]
+
+# The official template's ALL_Detail header row (row 4), verbatim and
+# in order -- read directly from
+# simple_resource/bamawl_import_export_format_filled.xlsx. Used (via
+# _build_bamawl_template_spec below) by
+# services/team_template_validator.py for an EXACT, position-by-position
+# match (not the tolerant whitespace/case matching
+# services/excel_parser.py's _find_column does when actually reading
+# data) -- an uploaded file whose columns are named or ordered
+# differently than this, even if every individually-required column
+# can still be *found* somewhere in the row, fails validation.
+BAMAWL_ALL_DETAIL_HEADERS: list[str] = [
+    "ID", "Function", "Status",
+    "\nDevelopment man-hours (h)\n", "\nCode review (h)", "Prototype(h)", "PrototypeReview(h)",
+    "\n\nBusiness flow(h)", "\nBusiness flow Review\n(h)",
+    "ERD(h)", "ERD Review(h)", "DFD(h)", "DFD Review(h)",
+    "\nDB Design(h)", "\nDB Design Review(h)",
+    "Screen/Form/Function (h)", "Review(h)",
+    "\nTest Specification(h)", "Review(h)",
+    "\nImplementation\n(h)",
+    "テスト仕様書(h)\nTest Specification", "レビュー(h)",
+    "実施(h)\nImplementation", "実施(h)\nImplementation",
+    "テストデータ作成(h)\nTest Data Creation", "マニュアル作成(h)\nUser Manual",
+    "付帯作業(h)\nAccidental Work", "リスク(h)", "管理工数(h)\nManagement Manhours",
+    "Total(h)",
+]
+
+# Optional template-version marker: not configured today because the
+# official template has no version cell/convention yet -- "template
+# version matches (if available)" in
+# services/team_template_validator.py::validate_team_template is a
+# documented no-op while this is None. Setting it to a real value (and
+# giving validate_team_template a cell reference to check it against)
+# is how a future template revision would turn this check on.
+BAMAWL_TEMPLATE_VERSION: str | None = None
+
+# Phases-mode column mapping for simple_resource/bamawl_import_export_format_filled.xlsx's
+# (Bamawl Team's single official template, used for both import and export)
 # "ALL_Detail" sheet (real header row is row 4, not row 1 -- see
 # docs/ARCHITECTURE.md §5i "Phase-Breakdown Excel Import"). Every phase
 # column below was verified directly against that file: summing all 26
@@ -112,6 +167,28 @@ BAMAWL_EXPORT_TEMPLATE: dict[str, Any] = {
         {"key": "remarks", "label": "Remarks", "width": 35},
     ],
 }
+
+# Bamawl Team's entry in the team-agnostic template-validation registry
+# (see services/team_template_validator.py::TeamTemplateSpec and
+# services/team_template_registry.py) -- bundles everything above that
+# a strict per-team upload validation needs, plus where its public
+# sample download lives. This is the one place a future SGL/KiKan/SSD
+# spec would be defined analogously (their own required sheet list,
+# header sheet/row, expected headers, column mapping, and sample path),
+# then registered in services/team_template_registry.py.
+def _build_bamawl_template_spec() -> Any:
+    from services.team_template_validator import TeamTemplateSpec
+
+    return TeamTemplateSpec(
+        team_name=BAMAWL_TEAM_NAME,
+        required_sheet_names=BAMAWL_REQUIRED_SHEET_NAMES,
+        header_sheet=BAMAWL_IMPORT_COLUMN_MAPPING["sheet"],
+        header_row=BAMAWL_IMPORT_COLUMN_MAPPING["header_row"],
+        expected_headers=BAMAWL_ALL_DETAIL_HEADERS,
+        column_mapping=BAMAWL_IMPORT_COLUMN_MAPPING,
+        template_version=BAMAWL_TEMPLATE_VERSION,
+        sample_template_path=("import", "bamawl", "bamawl_import_template.xlsx"),
+    )
 
 
 def seed_bamawl_import_export_config(mhes_db_path: str) -> dict[str, Any] | None:

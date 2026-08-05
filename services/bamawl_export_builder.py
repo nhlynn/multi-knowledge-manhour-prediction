@@ -2,8 +2,12 @@
 
 Unlike the generic export path (``services/export_workbook_service.py``,
 which builds a fresh workbook from scratch via a column-layout config),
-Bamawl Team's export is built directly on top of its own real Excel
-template file (``simple_resource/bamawl_import_export_format.xlsx``):
+Bamawl Team's export is built directly on top of Bamawl Team's single
+official Excel workbook (``simple_resource/bamawl_import_export_format_filled.xlsx``)
+-- the same file (identical structure -- same 7 worksheets, same
+``ALL_Detail`` layout) used on the import side by
+``services/team_template_validator.py``. There is deliberately no separate
+import-only or export-only template file:
 
 - The template workbook is loaded as-is and saved back out — every
   worksheet (``ReqDefinition``, ``FunctionList``, ``TotalManhour``,
@@ -18,7 +22,7 @@ template file (``simple_resource/bamawl_import_export_format.xlsx``):
   configured ``column_mapping`` (phases mode; see
   ``utils/migrations/bamawl_import_export_config.py``) to know which
   column each phase (Development, Code Review, ...) belongs in, the
-  export-side mirror of how ``services/bamawl_import_parser.py`` reads
+  export-side mirror of how ``services/team_template_validator.py`` reads
   that same sheet on the way in.
 - The ``FunctionList`` worksheet's "Function Name" column is
   regenerated from that exact same task set (one row per ``ALL_Detail``
@@ -30,6 +34,25 @@ template file (``simple_resource/bamawl_import_export_format.xlsx``):
   ``ALL_Detail`` data next to it. No other worksheet reads or depends
   on ``FunctionList``'s contents (checked directly -- no cross-sheet
   formula references it), so regenerating it has no effect elsewhere.
+- ``ReqDefinition``'s title cell (``B1``, merged ``B1:C1`` -- the
+  template's original sample text, e.g. "Bamawl HR & Attendance
+  System") is replaced with the Preview page's Project Name field,
+  exactly as the user typed it (no trimming/casing/reformatting), or
+  left blank if that field was empty. Only this one cell's *value* is
+  touched -- the merge and formatting are untouched.
+- ``ReqDefinition``'s Purpose / In Scope / Document Specifications /
+  Functional Specifications / Server Environment / Out of Scope value
+  cells are always cleared, deliberately -- never filled from AI
+  generation, the database, or the Preview payload (there is no
+  MHES data model field these could even come from) -- so a user fills
+  them in manually after export. Only the value cell next to each
+  label is cleared; the label text, its formatting, and its merged
+  range are untouched.
+- ``Business Flow(system admin)``'s content -- confirmed to be exactly
+  one embedded picture, no shapes/SmartArt/text boxes/connectors --
+  is always stripped from the export. The worksheet itself is kept
+  (an empty sheet, not removed from the workbook); only its picture
+  and drawing part are dropped on save.
 
 **Known limitation** (a direct consequence of reusing this specific
 template file rather than building a fresh one): ``ALL_Detail`` has its
@@ -64,6 +87,35 @@ FUNCTION_LIST_SHEET = "FunctionList"
 FUNCTION_LIST_HEADER_ROW = 1
 FUNCTION_LIST_NO_COLUMN = 2  # "No."
 FUNCTION_LIST_NAME_COLUMN = 3  # "Function Name"
+
+# Same reasoning as FunctionList above: ReqDefinition isn't part of the
+# import column_mapping either, so its title cell's location is fixed
+# here.
+REQ_DEFINITION_SHEET = "ReqDefinition"
+REQ_DEFINITION_TITLE_CELL = "B1"
+
+# These sections' VALUE cells (column C, next to their label in column
+# B) are intentionally always left blank on export -- see
+# _blank_req_definition_sections. Matched by label text (not hardcoded
+# row numbers), since the label itself is what identifies each section.
+REQ_DEFINITION_LABEL_COLUMN = 2  # B
+REQ_DEFINITION_VALUE_COLUMN = 3  # C
+REQ_DEFINITION_BLANK_SECTION_LABELS = [
+    "Purpose",
+    "In Scope",
+    "Document Specifications",
+    "Functional Specifications",
+    "Server Environment",
+    "Out of Scope",
+]
+
+# The template's "Business Flow(system admin)" sheet carries no cell
+# content at all (dims A1:A1) -- its only content is one embedded
+# picture (a diagram/screenshot) covering the sheet, confirmed directly
+# against the drawing XML: exactly one <xdr:pic> anchor, no shapes,
+# connectors, or SmartArt. Stripped entirely on export -- see
+# _strip_business_flow_content.
+BUSINESS_FLOW_SHEET = "Business Flow(system admin)"
 
 
 class BamawlExportError(ValueError):
@@ -191,11 +243,129 @@ def _populate_function_list(wb, task_names: list[str]) -> None:
     )
 
 
+def _populate_req_definition_title(wb, project_name: str | None) -> None:
+    """Replace ``ReqDefinition``'s title cell with the Preview page's
+    Project Name, used exactly as entered (no trimming/casing changes),
+    or blank if it was empty/None.
+
+    Only this one cell's value is set — its existing formatting (font,
+    fill, borders) and its merge (``B1:C1``) are untouched, since
+    writing into the top-left cell of an existing merged range is all
+    that's needed; no other cell in this worksheet is touched.
+
+    A missing ``ReqDefinition`` worksheet is not fatal — logged and
+    skipped, same reasoning as a missing ``FunctionList``.
+    """
+    if REQ_DEFINITION_SHEET not in wb.sheetnames:
+        logger.warning(
+            "Bamawl Team's export template has no '%s' worksheet; skipping "
+            "project title replacement.", REQ_DEFINITION_SHEET,
+        )
+        return
+
+    ws = wb[REQ_DEFINITION_SHEET]
+    ws[REQ_DEFINITION_TITLE_CELL].value = project_name or None
+    logger.info(
+        "Set '%s'!%s to Project Name %r.",
+        REQ_DEFINITION_SHEET, REQ_DEFINITION_TITLE_CELL, project_name or "",
+    )
+
+
+def _blank_req_definition_sections(wb) -> None:
+    """Clear the value cell next to each of
+    ``REQ_DEFINITION_BLANK_SECTION_LABELS`` (Purpose, In Scope, Document
+    Specifications, Functional Specifications, Server Environment, Out
+    of Scope) — deliberately, on every export, regardless of what the
+    template's own sample content or any other data source might say.
+
+    Nothing populates these from AI generation, the database, or the
+    Preview payload — they're simply set to blank so a user fills them
+    in manually after export. Only the value cell (column C) is
+    touched; the label itself (column B) and everything else in the
+    worksheet (including the just-written title in ``B1``) are
+    untouched.
+
+    Matched by the label text actually present in column B for each
+    row (case/whitespace-tolerant via ``_normalize_header``), not a
+    hardcoded row number — a label merged across several rows (e.g.
+    "Server Environment" spanning B7:B11, "Out of Scope" spanning
+    B12:B19) only has its label text in the merge's first row, which is
+    exactly the row whose value cell (the corresponding merged range's
+    first cell, e.g. C7 or C12) needs clearing.
+    """
+    if REQ_DEFINITION_SHEET not in wb.sheetnames:
+        logger.warning(
+            "Bamawl Team's export template has no '%s' worksheet; skipping "
+            "section blanking.", REQ_DEFINITION_SHEET,
+        )
+        return
+
+    ws = wb[REQ_DEFINITION_SHEET]
+    targets = {_normalize_header(label) for label in REQ_DEFINITION_BLANK_SECTION_LABELS}
+    blanked: list[str] = []
+
+    for r in range(1, ws.max_row + 1):
+        label = ws.cell(row=r, column=REQ_DEFINITION_LABEL_COLUMN).value
+        if label and _normalize_header(str(label)) in targets:
+            ws.cell(row=r, column=REQ_DEFINITION_VALUE_COLUMN).value = None
+            blanked.append(str(label))
+
+    missing = targets - {_normalize_header(b) for b in blanked}
+    if missing:
+        logger.warning(
+            "Bamawl export: could not find these '%s' section label(s) to blank: %s",
+            REQ_DEFINITION_SHEET, sorted(missing),
+        )
+    logger.info("Blanked %d '%s' section value(s): %s", len(blanked), REQ_DEFINITION_SHEET, blanked)
+
+
+def _strip_business_flow_content(wb) -> None:
+    """Remove every editable business-flow element from the
+    ``Business Flow(system admin)`` worksheet -- diagrams, flowcharts,
+    SmartArt, shapes, text boxes, connector lines, and images copied
+    from the Bamawl Team template -- while keeping the worksheet
+    itself (an empty sheet, not removed from the workbook).
+
+    ``ws._images`` covers the one embedded picture the template
+    actually has here (confirmed directly against the sheet's drawing
+    XML: a single ``<xdr:pic>`` anchor, nothing else) -- clearing it
+    drops that image, and with it the sheet's entire drawing part, when
+    the workbook is saved. ``openpyxl`` does not model
+    shapes/SmartArt/text boxes/connectors as separate objects it could
+    round-trip in the first place (it only understands cells, images,
+    and charts), so loading this workbook through it already discards
+    any such elements before this function ever runs; clearing
+    ``_images`` (and, defensively, ``_charts``, in case a future
+    template revision adds one) is what actually removes the one kind
+    of visual content this library *does* otherwise preserve.
+
+    A missing worksheet is not fatal — logged and skipped, same
+    reasoning as a missing ``FunctionList``/``ReqDefinition``.
+    """
+    if BUSINESS_FLOW_SHEET not in wb.sheetnames:
+        logger.warning(
+            "Bamawl Team's export template has no '%s' worksheet; nothing to strip.",
+            BUSINESS_FLOW_SHEET,
+        )
+        return
+
+    ws = wb[BUSINESS_FLOW_SHEET]
+    image_count = len(ws._images)
+    chart_count = len(ws._charts)
+    ws._images = []
+    ws._charts = []
+    logger.info(
+        "Stripped '%s': removed %d image(s) and %d chart(s); worksheet itself kept.",
+        BUSINESS_FLOW_SHEET, image_count, chart_count,
+    )
+
+
 def build_bamawl_workbook(
     filepath: str,
     categories: list[dict[str, Any]],
     column_mapping: dict[str, Any],
     template_path: str,
+    project_name: str | None = None,
 ) -> None:
     """Populate Bamawl Team's own Excel template with system data and
     save it to ``filepath``.
@@ -212,8 +382,14 @@ def build_bamawl_workbook(
         column_mapping: Bamawl Team's configured phases-mode column
             mapping (``sheet``, ``header_row``, ``task_column``,
             ``id_column``, ``phase_columns``, ``total_column``).
-        template_path: Path to Bamawl Team's real template workbook
-            (``simple_resource/bamawl_import_export_format.xlsx``).
+        template_path: Path to Bamawl Team's single official template
+            workbook (``simple_resource/bamawl_import_export_format_filled.xlsx``
+            -- see ``routes/export.py::_bamawl_template_path``), the
+            same file used on the import side.
+        project_name: The Preview page's Project Name field, used
+            verbatim to replace ``ReqDefinition``'s title cell. None or
+            empty leaves that cell blank (see
+            ``_populate_req_definition_title``).
 
     Raises:
         BamawlExportError: if the template file/worksheet/columns
@@ -282,15 +458,31 @@ def build_bamawl_workbook(
             ws.cell(row=row, column=id_col, value=i)
         ws.cell(row=row, column=task_col, value=task.get("task", ""))
 
-        row_total = 0.0
+        activities_sum = 0.0
         for label, col_idx in phase_cols:
             value = _phase_value(activities, label)
             if value:
                 ws.cell(row=row, column=col_idx, value=value)
-                row_total += value
+                activities_sum += value
 
+        # The row's own Total(h) cell uses the task's real total
+        # (estimate + buffer, exactly what Preview's Grand Total sums)
+        # rather than re-deriving it from just the phase columns above
+        # -- those two only agree when a task's buffer is 0. Using
+        # task_total here is what makes this workbook's built-in
+        # TotalManhour sum (=ALL_Detail!AD15=SUM(AD5:AD14)) match
+        # Preview's Grand Total exactly, buffer included.
+        task_total = _safe_float(task.get("total_hours", activities_sum))
         if total_col:
-            ws.cell(row=row, column=total_col, value=row_total)
+            ws.cell(row=row, column=total_col, value=task_total)
+
+        if abs(task_total - activities_sum) > 0.01:
+            logger.info(
+                "Bamawl export: task %r total_hours (%.2f) differs from its phase "
+                "columns' sum (%.2f) -- likely buffer hours or an unmatched "
+                "activity; the row's Total(h) cell uses total_hours.",
+                task.get("task", ""), task_total, activities_sum,
+            )
 
         row += 1
 
@@ -302,6 +494,9 @@ def build_bamawl_workbook(
         )
 
     _populate_function_list(wb, [task.get("task", "") for task in tasks])
+    _populate_req_definition_title(wb, project_name)
+    _blank_req_definition_sections(wb)
+    _strip_business_flow_content(wb)
 
     wb.save(filepath)
     logger.info(

@@ -19,17 +19,16 @@ from flask import (
     session,
     url_for,
 )
-from services.bamawl_import_parser import BamawlTemplateError, validate_bamawl_template
 from services.embedding_service import EmbeddingService
 from services.excel_service import ExcelService
 from services.kb_template_service import build_template_workbook as _build_template_workbook
 from services.kb_upload_service import upload_and_embed_files
+from services.team_template_registry import get_team_template_spec
+from services.team_template_validator import TeamTemplateError, validate_team_template
 from utils.permissions import require_roles
 from utils.team_storage import team_folders_for_team_id
 
 logger = logging.getLogger(__name__)
-
-_BAMAWL_TEAM_NAME = "Bamawl Team"
 
 upload_bp = Blueprint("upload", __name__)
 # Knowledge Base management is an Admin / Team Manager capability (see
@@ -77,17 +76,53 @@ def _team_column_mapping() -> dict[str, str] | None:
     return config["column_mapping"] if config else None
 
 
-def _is_bamawl_team() -> bool:
-    """Return whether the current session's team is Bamawl Team.
-
-    Checked by name (not id/slug), matching how
-    ``utils/migrations/bamawl_import_export_config.py`` looks Bamawl
-    Team up — so this stays correct regardless of that team's id/slug.
-    """
+def _current_team_name() -> str | None:
+    """Return the current session's team's name, or None if it can't be resolved."""
     from repositories.team_repository import TeamRepository
 
     team = TeamRepository(current_app.config["MHES_DB_PATH"]).get_by_id(session["team_id"])
-    return team is not None and team["name"] == _BAMAWL_TEAM_NAME
+    return team["name"] if team is not None else None
+
+
+def _current_team_template_spec():
+    """Return the current session's team's registered
+    ``TeamTemplateSpec`` (see ``services/team_template_registry.py``),
+    or None if that team has no strictly-validated template of its own
+    -- in which case its upload keeps using the existing generic,
+    lenient, keyword-based column matching, unaffected by any of this.
+
+    This is the single point where "detect the current user's team,
+    then look up the template assigned to it" happens — every other
+    function here just uses whatever this returns.
+    """
+    team_name = _current_team_name()
+    return get_team_template_spec(team_name) if team_name else None
+
+
+def _invalid_template_message(spec) -> str:
+    return f"Invalid import template. Please download and use the latest {spec.team_name} import template."
+
+
+def _team_template_error_flash_message(spec, error: TeamTemplateError) -> str:
+    """Build the user-facing flash text for a rejected upload: the
+    generic friendly message, plus the short reason category if one is
+    available (e.g. "Missing worksheet: ALL_Detail", "Invalid column
+    order") -- never the exception's full technical detail (worksheet
+    lists, exact row/column positions, etc.), which is logged
+    separately instead.
+    """
+    base = _invalid_template_message(spec)
+    return f"{base} ({error.reason})" if error.reason else base
+
+
+def _team_sample_template_path(spec) -> str | None:
+    """Return ``spec``'s sample template's absolute path, or None if
+    that team has no dedicated sample -- in which case the generic
+    ``download_template`` fallback applies.
+    """
+    if spec is None or not spec.sample_template_path:
+        return None
+    return os.path.join(current_app.root_path, *spec.sample_template_path)
 
 
 # ------------------------------------------------------------------
@@ -106,12 +141,26 @@ def upload_page() -> str:
 
 @upload_bp.route("/template", methods=["GET"])
 def download_template():
-    """Download a blank knowledge-file template with the expected columns.
+    """Download the current session's team's knowledge-file template.
 
-    The columns match what ``services.excel_parser`` looks for
-    (flexibly, by keyword), so a file filled in from this template is
-    guaranteed to be parsed and embedded correctly on upload.
+    A team with its own registered ``TeamTemplateSpec`` (see
+    ``services/team_template_registry.py``) that also has a sample
+    path configured downloads that instead of the generic template --
+    e.g. Bamawl Team gets its own real-structure, sanitized sample
+    workbook (``import/bamawl/bamawl_import_template.xlsx``), never the
+    internal template MHES actually validates/builds against
+    server-side. Every other team keeps the existing generic behavior
+    below, unaffected.
     """
+    dedicated_path = _team_sample_template_path(_current_team_template_spec())
+    if dedicated_path:
+        return send_file(
+            dedicated_path, as_attachment=True, download_name=os.path.basename(dedicated_path),
+        )
+
+    # Generic fallback: columns match what ``services.excel_parser``
+    # looks for (flexibly, by keyword), so a file filled in from this
+    # template is guaranteed to be parsed and embedded correctly on upload.
     filename = "MHES_KB_Template.xlsx"
     filepath = os.path.join(current_app.instance_path, filename)
     os.makedirs(current_app.instance_path, exist_ok=True)
@@ -140,6 +189,50 @@ def check_duplicates() -> tuple:
     return jsonify({"duplicates": duplicates})
 
 
+@upload_bp.route("/validate-template", methods=["POST"])
+def validate_template():
+    """Structurally validate one file against the current session's
+    team's registered template, without saving or embedding anything.
+
+    Called client-side right after a file is selected (before the user
+    even clicks Upload), so an invalid file can be flagged immediately
+    with a specific reason and a "Download Latest Template" link — all
+    without a page reload, and without the file ever reaching disk.
+    ``upload_files`` below still re-validates at submit time as a
+    server-side backstop; this endpoint only improves the UX of that
+    same check.
+
+    A team with no registered ``TeamTemplateSpec`` (every team except
+    Bamawl today) always gets ``{"valid": true}`` immediately — this
+    endpoint has no effect on their upload flow.
+
+    Expects a single-file multipart form body: ``files``.
+
+    Returns:
+        JSON ``{"valid": true}``, or ``{"valid": false, "message": ...,
+        "reason": ...}`` with the same user-facing wording
+        ``upload_files``'s rejection flash uses.
+    """
+    spec = _current_team_template_spec()
+    if spec is None:
+        return jsonify({"valid": True})
+
+    file = request.files.get("files")
+    if file is None or file.filename in (None, ""):
+        return jsonify({"valid": True})
+
+    try:
+        validate_team_template(file.stream, spec)
+        return jsonify({"valid": True})
+    except TeamTemplateError as e:
+        logger.info("Pre-check rejected '%s' for %s: %s", file.filename, spec.team_name, e)
+        return jsonify({
+            "valid": False,
+            "message": _invalid_template_message(spec),
+            "reason": e.reason,
+        })
+
+
 @upload_bp.route("/", methods=["POST"])
 def upload_files() -> str:
     """Handle one or multiple Excel file uploads.
@@ -159,22 +252,30 @@ def upload_files() -> str:
 
     column_mapping = _team_column_mapping()
 
-    # Bamawl Team accepts only its own Excel template (see
-    # services/bamawl_import_parser.py) — validated here, before saving,
-    # so an invalid file is rejected outright with a clear message
-    # instead of being saved and only failing embedding later with a
-    # generic error. Every other team's upload flow is unaffected.
-    if _is_bamawl_team() and column_mapping:
+    # A team with its own registered TeamTemplateSpec (see
+    # services/team_template_registry.py) accepts only its own official
+    # Excel template — validated here, before saving, so an invalid
+    # file is rejected outright with a clear message instead of being
+    # saved and only failing embedding later with a generic error.
+    # Every team without a registered spec is completely unaffected.
+    spec = _current_team_template_spec()
+    if spec:
         accepted_files = []
         for file in files:
             if file.filename in (None, ""):
                 continue
             try:
-                validate_bamawl_template(file.stream, column_mapping)
+                validate_team_template(file.stream, spec)
                 accepted_files.append(file)
-            except BamawlTemplateError as e:
-                logger.warning("Rejected '%s' for Bamawl Team: %s", file.filename, e)
-                flash(f"Rejected '{file.filename}': {e}", "danger")
+            except TeamTemplateError as e:
+                # Full technical detail (worksheet list, exact
+                # row/column, etc.) goes to the log only -- the user
+                # sees a generic, friendly message plus a short reason
+                # category, never a raw exception string.
+                logger.warning("Rejected '%s' for %s: %s", file.filename, spec.team_name, e)
+                flash(
+                    f"'{file.filename}': {_team_template_error_flash_message(spec, e)}", "danger",
+                )
         files = accepted_files
         if not files:
             return redirect(url_for("upload.upload_page"))
@@ -237,12 +338,13 @@ def reembed_file(filename: str) -> str:
     kb_path = svc.get_kb_path(filename)
     column_mapping = _team_column_mapping()
 
-    if _is_bamawl_team() and column_mapping:
+    spec = _current_team_template_spec()
+    if spec:
         try:
-            validate_bamawl_template(kb_path, column_mapping)
-        except BamawlTemplateError as e:
-            logger.warning("Rejected re-embed of '%s' for Bamawl Team: %s", filename, e)
-            flash(f"Re-embedding failed: {e}", "danger")
+            validate_team_template(kb_path, spec)
+        except TeamTemplateError as e:
+            logger.warning("Rejected re-embed of '%s' for %s: %s", filename, spec.team_name, e)
+            flash(_team_template_error_flash_message(spec, e), "danger")
             return redirect(url_for("upload.upload_page"))
 
     try:

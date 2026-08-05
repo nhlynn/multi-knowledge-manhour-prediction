@@ -377,6 +377,58 @@
         saveChatHistory();
     }
 
+    // Sums the same task/activity fields the same way everywhere a
+    // "total" is shown or carried into Preview — used both for the
+    // already-correct Preview/"Go to Preview" total (selection-scoped)
+    // and the per-response chat display below, so both always agree on
+    // what "total" means; only the *set* of categories passed in differs.
+    function sumCategoriesTotals(categories) {
+        var totals = { task_estimate: 0, estimate: 0, buffer: 0, final: 0 };
+        categories.forEach(function(cat) {
+            cat.tasks.forEach(function(task) {
+                totals.estimate += task.estimate_hours;
+                totals.buffer += task.buffer_hours;
+                totals.final += task.total_hours;
+                task.activities.forEach(function(act) {
+                    totals.task_estimate += act.estimate_hours;
+                });
+            });
+        });
+        return totals;
+    }
+
+    // Recomputes and redisplays one response's total from only its
+    // currently-CHECKED categories (nothing checked = 0h) -- the
+    // response's own table rows/per-task figures are unaffected; only
+    // this aggregate reflects the current selection, updating live as
+    // checkboxes are toggled (see the 'change' listener below).
+    function updateResponseTotals(resultId) {
+        var categories = resultStore[resultId];
+        if (!categories) return;
+        var checkedIdx = {};
+        document.querySelectorAll('.cat-cb[data-result="' + resultId + '"]:checked').forEach(function(cb) {
+            checkedIdx[cb.getAttribute('data-cat')] = true;
+        });
+        var selected = categories.filter(function(cat, idx) { return checkedIdx[idx]; });
+        var totals = sumCategoriesTotals(selected);
+
+        var summaryFinal = document.getElementById('summaryFinal-' + resultId);
+        var summaryEstimate = document.getElementById('summaryEstimate-' + resultId);
+        var summaryBuffer = document.getElementById('summaryBuffer-' + resultId);
+        if (summaryFinal) summaryFinal.textContent = totals.final;
+        if (summaryEstimate) summaryEstimate.textContent = totals.estimate;
+        if (summaryBuffer) summaryBuffer.textContent = totals.buffer;
+
+        var footTaskEstimate = document.getElementById('footTaskEstimate-' + resultId);
+        var footEstimate = document.getElementById('footEstimate-' + resultId);
+        var footBuffer = document.getElementById('footBuffer-' + resultId);
+        var footFinal = document.getElementById('footFinal-' + resultId);
+        if (footTaskEstimate) footTaskEstimate.textContent = totals.task_estimate;
+        if (footEstimate) footEstimate.textContent = totals.estimate;
+        if (footBuffer) footBuffer.textContent = totals.buffer;
+        if (footFinal) footFinal.textContent = totals.final;
+    }
+
     function buildResponseHtml(query, categories, totals) {
         // Generate a unique id for this result set and store categories
         var resultId = 'r' + Date.now();
@@ -394,10 +446,19 @@
             if (cat.source && sources.indexOf(cat.source) === -1) sources.push(cat.source);
         });
 
+        // The displayed total reflects only whichever categories are
+        // checked below (none yet, right after a fresh search — hence
+        // 0 here) rather than every matching result — see
+        // updateResponseTotals, called once more right after this HTML
+        // is inserted into the DOM (checkbox ids must exist first) and
+        // again on every checkbox toggle. `totals` (all matched
+        // results, as the backend computed it) is intentionally not
+        // used for this display anymore.
         var summary = '<p class="mb-2">I found <strong>' + taskCount + ' task(s)</strong> with <strong>' +
             actCount + ' activit' + (actCount === 1 ? 'y' : 'ies') + '</strong> matching your query. ' +
-            'The total estimate is <strong>' + totals.final + ' hours</strong> ' +
-            '(' + totals.estimate + 'h estimate + ' + totals.buffer + 'h buffer).</p>';
+            'The total estimate for your selected function(s) is <strong id="summaryFinal-' + resultId + '">0</strong> hours ' +
+            '(<span id="summaryEstimate-' + resultId + '">0</span>h estimate + ' +
+            '<span id="summaryBuffer-' + resultId + '">0</span>h buffer).</p>';
 
         // Build table with checkbox column
         var table = '<div class="table-responsive mt-2"><table class="table table-bordered align-middle mb-0">' +
@@ -455,13 +516,16 @@
             });
         });
 
+        // Same reasoning as the summary line above: starts at 0 (nothing
+        // checked yet) and is kept in sync with the current selection by
+        // updateResponseTotals, not by the backend's all-results totals.
         table += '</tbody><tfoot class="table-dark"><tr>' +
             '<td></td>' +
-            '<td colspan="3" class="fw-bold">Total</td>' +
-            '<td class="text-end fw-bold">' + totals.task_estimate + '</td>' +
-            '<td class="text-end fw-bold">' + totals.estimate + '</td>' +
-            '<td class="text-end fw-bold">' + totals.buffer + '</td>' +
-            '<td class="text-end fw-bold">' + totals.final + '</td>' +
+            '<td colspan="3" class="fw-bold">Total (selected)</td>' +
+            '<td class="text-end fw-bold" id="footTaskEstimate-' + resultId + '">0</td>' +
+            '<td class="text-end fw-bold" id="footEstimate-' + resultId + '">0</td>' +
+            '<td class="text-end fw-bold" id="footBuffer-' + resultId + '">0</td>' +
+            '<td class="text-end fw-bold" id="footFinal-' + resultId + '">0</td>' +
             '<td></td>' +
             '</tr></tfoot></table></div>';
 
@@ -489,6 +553,14 @@
         goPreviewBtn.disabled = !noneCheckbox.checked && count === 0;
     }
 
+    // Recomputes every response's displayed total currently in the chat
+    // (not just the one just toggled) -- cheap (resultStore lookups plus
+    // a DOM query per response) and correct for both a single checkbox
+    // toggle and a bulk uncheck ("None of the above" below).
+    function updateAllResponseTotals() {
+        Object.keys(resultStore).forEach(updateResponseTotals);
+    }
+
     // Show/hide bar when any category checkbox changes
     chatMessages.addEventListener('change', function(e) {
         if (e.target.classList.contains('cat-cb')) {
@@ -496,6 +568,7 @@
                 noneCheckbox.checked = false;
             }
             updateSelectionBar();
+            updateResponseTotals(e.target.getAttribute('data-result'));
         }
     });
 
@@ -506,6 +579,7 @@
                 cb.checked = false;
             });
             updateSelectionBar();
+            updateAllResponseTotals();
         }
     });
 
@@ -587,17 +661,7 @@
         });
         existing = merged;
 
-        var totals = { task_estimate: 0, estimate: 0, buffer: 0, final: 0 };
-        existing.forEach(function(cat) {
-            cat.tasks.forEach(function(task) {
-                totals.estimate += task.estimate_hours;
-                totals.buffer += task.buffer_hours;
-                totals.final += task.total_hours;
-                task.activities.forEach(function(act) {
-                    totals.task_estimate += act.estimate_hours;
-                });
-            });
-        });
+        var totals = sumCategoriesTotals(existing);
 
         sessionStorage.setItem('previewData', JSON.stringify({
             categories: existing,
@@ -643,6 +707,11 @@
             hasResults = true;
             noneCheckbox.checked = false;
             updateSelectionBar();
+            // Sets this new response's displayed total to its actual
+            // (initially 0 -- nothing checked yet) selection-scoped
+            // value; the ids buildResponseHtml wrote only exist in the
+            // DOM once replaceBotMessage has inserted them above.
+            updateAllResponseTotals();
         })
         .catch(function() {
             replaceBotMessage(loadingId,
@@ -701,6 +770,13 @@
                 }
                 hasResults = document.querySelectorAll('.cat-cb').length > 0;
                 updateSelectionBar();
+                // Restored checkboxes come back unchecked (checked
+                // state is a live DOM property, not part of the saved
+                // HTML) -- resync each response's displayed total to
+                // that actual (unchecked) state instead of leaving
+                // whatever total happened to be on screen when this
+                // conversation was last saved.
+                updateAllResponseTotals();
                 scrollToBottom();
             }
             return;
