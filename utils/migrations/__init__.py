@@ -57,9 +57,18 @@ no-ops if there is nothing to migrate (e.g. a fresh install):
    ``ALL_Detail`` sheet) and Export Template. Only affects the team
    named "Bamawl Team"; no other team's configuration is touched.
    (:mod:`utils.migrations.bamawl_import_export_config`)
+10. ``seed_kikan_import_export_config`` — seeds/corrects KiKan Team's
+    own Import Template (phases-mode column mapping matching
+    ``import/kikan/kikan_import_template.xlsx``'s ``工数詳細`` sheet)
+    -- KiKan Team's one official template, used for download, import,
+    and (via ``services/kikan_export_builder.py``) as the export base
+    too -- no separate export template. Only affects the team named
+    "KiKan Team"; no other team's configuration is touched.
+    (:mod:`utils.migrations.kikan_import_export_config`)
 """
 
 from utils.migrations.bamawl_import_export_config import seed_bamawl_import_export_config
+from utils.migrations.kikan_import_export_config import seed_kikan_import_export_config
 from utils.migrations.demo_seeds import (
     seed_development_team_export_template,
     seed_development_team_import_config,
@@ -94,6 +103,7 @@ __all__ = [
     "DEFAULT_TEAMS",
     "seed_default_teams",
     "seed_bamawl_import_export_config",
+    "seed_kikan_import_export_config",
     "migrate_kb_to_team_storage",
     "create_default_admin_user",
     "seed_development_team_import_config",

@@ -76,6 +76,7 @@ from typing import Any
 
 import openpyxl
 
+from services.base_export_service import BaseExportService, ExportContext
 from services.excel_parser import _find_column, _normalize_header, _safe_float
 
 logger = logging.getLogger(__name__)
@@ -503,3 +504,58 @@ def build_bamawl_workbook(
         "Built Bamawl Team export workbook: %s (%d task row(s) written into '%s')",
         filepath, len(tasks), sheet_name,
     )
+
+
+class BamawlExportBuilder(BaseExportService):
+    """Bamawl Team's export builder (Strategy Pattern) -- the single
+    home for everything Bamawl-specific about exporting: the Strategy
+    Pattern wiring (``build``), and how to resolve Bamawl Team's own
+    ``column_mapping``/template path (``resolve_column_mapping``,
+    ``template_path``), which used to live in ``routes/export.py`` as
+    Bamawl-only helper functions. That route is now completely
+    generic -- it only ever calls this class's methods, never
+    Bamawl-specific logic of its own (see
+    ``routes/export.py::_select_export_strategy``).
+
+    ``build`` itself still simply delegates to ``build_bamawl_workbook``
+    above (unchanged) -- this class is a thin, dedicated container
+    around Bamawl's own already-existing, already-tested logic, not a
+    reimplementation of it.
+    """
+
+    team_name = "Bamawl Team"
+
+    @staticmethod
+    def resolve_column_mapping(mhes_db_path: str, team_id: int) -> dict[str, Any] | None:
+        """Return Bamawl Team's configured import column mapping for
+        ``team_id``, or None if it hasn't been seeded yet.
+
+        The export builder reuses this (rather than a separate
+        config) — it already describes exactly which worksheet/columns
+        ``ALL_Detail``'s data lives in, the same mapping
+        ``services/team_template_validator.py`` reads it with.
+        """
+        from repositories.team_import_config_repository import TeamImportConfigRepository
+
+        repo = TeamImportConfigRepository(mhes_db_path)
+        config = repo.get_by_team_id(team_id)
+        return config["column_mapping"] if config else None
+
+    @staticmethod
+    def template_path(app_root_path: str) -> str:
+        """Path to Bamawl Team's single official Excel template.
+
+        ``bamawl_import_export_format_filled.xlsx`` is the one
+        workbook used for both import
+        (``services/team_template_validator.py`` accepts an upload
+        structurally matching it) and export (this builds directly on
+        top of it) -- there is deliberately no separate import-only or
+        export-only template file (see this module's own docstring).
+        """
+        return os.path.join(app_root_path, "simple_resource", "bamawl_import_export_format_filled.xlsx")
+
+    def build(self, context: ExportContext) -> None:
+        build_bamawl_workbook(
+            context.filepath, context.categories, context.column_mapping,
+            context.template_path, project_name=context.project_name,
+        )

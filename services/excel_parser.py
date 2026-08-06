@@ -41,9 +41,20 @@ logger = logging.getLogger(__name__)
 
 
 def _slugify(text: str) -> str:
-    """Convert text to a URL-friendly slug."""
+    """Convert text to a URL-friendly slug.
+
+    ``\\w`` is Unicode-aware by default for ``str`` patterns in Python 3
+    (matches any script's letters/digits, not just ASCII a-z0-9) --
+    required so non-Latin task/category names (e.g. KiKan Team's
+    Japanese function names) don't all collapse to the same empty
+    slug, silently merging distinct tasks together. Every existing
+    ASCII input (every team's data before KiKan) slugifies identically
+    to before: ``\\w`` still matches exactly a-z0-9 plus underscore for
+    ASCII text, and no team's real category/task names contain a
+    literal underscore, so this is behavior-preserving for them.
+    """
     text = text.lower().strip()
-    text = re.sub(r"[^a-z0-9\s-]", "", text)
+    text = re.sub(r"[^\w\s-]", "", text, flags=re.UNICODE)
     text = re.sub(r"[\s]+", "-", text)
     return text
 

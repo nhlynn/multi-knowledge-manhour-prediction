@@ -31,15 +31,22 @@ from flask import (
     session,
     url_for,
 )
-from services.bamawl_export_builder import BamawlExportError, build_bamawl_workbook
+from services.bamawl_export_builder import BamawlExportBuilder
+from services.base_export_service import ExportContext
 from services.export_history_service import ExportHistoryService
 from services.export_pipeline_service import (
     build_export_filename,
     sanitize_project_name_for_filename,
     upload_export_with_retry,
 )
+from services.export_strategies import (
+    BamawlExportError,
+    DefaultExportStrategy,
+    KikanExportError,
+    get_export_strategy_class,
+)
+from services.kikan_export_builder import KikanExportBuilder
 from services.export_workbook_service import DEFAULT_EXPORT_TEMPLATE
-from services.export_workbook_service import build_workbook as _build_workbook
 from services.gcs_service import (
     GCSError,
     download_excel_bytes,
@@ -56,8 +63,6 @@ logger = logging.getLogger(__name__)
 export_bp = Blueprint("export", __name__)
 # Any logged-in role (Member and above) can export results.
 export_bp.before_request(require_login)
-
-_BAMAWL_TEAM_NAME = "Bamawl Team"
 
 
 def _team_id_filter() -> int | None:
@@ -85,46 +90,63 @@ def _team_export_template() -> dict:
     return config["template_config"] if config else DEFAULT_EXPORT_TEMPLATE
 
 
-def _is_bamawl_team() -> bool:
-    """Return whether the current session's team is Bamawl Team.
-
-    Checked by name, matching ``routes/upload.py``'s helper of the same
-    name and how ``utils/migrations/bamawl_import_export_config.py``
-    looks Bamawl Team up.
-    """
+def _current_team_name() -> str | None:
+    """Return the current session's team's name, or None if it can't be resolved."""
     from repositories.team_repository import TeamRepository
 
     team = TeamRepository(current_app.config["MHES_DB_PATH"]).get_by_id(session["team_id"])
-    return team is not None and team["name"] == _BAMAWL_TEAM_NAME
+    return team["name"] if team is not None else None
 
 
-def _bamawl_import_column_mapping() -> dict | None:
-    """Return Bamawl Team's configured import column mapping.
+def _select_export_strategy(
+    build_path: str, project_name: str, created_by: str, project_remark: str, categories: list,
+) -> tuple:
+    """Select this export's Strategy Pattern object and build its
+    ``ExportContext`` (see ``services/base_export_service.py``,
+    ``services/export_strategies.py``).
 
-    The export builder reuses this (rather than a separate config) —
-    it already describes exactly which worksheet/columns
-    ``ALL_Detail``'s data lives in, the same mapping
-    ``services/team_template_validator.py`` reads it with.
+    A team's own dedicated strategy (looked up by name via
+    ``get_export_strategy_class`` -- Bamawl Team, KiKan Team today)
+    only actually applies once that team's own config is confirmed
+    present (``bamawl_mapping``/``kikan_mapping``, each resolved via
+    that strategy class's own ``resolve_column_mapping``, non-empty) --
+    a team named "Bamawl Team"/"KiKan Team" whose config hasn't been
+    seeded yet still falls back to ``DefaultExportStrategy``, the same
+    safety net this dispatch had before the Strategy Pattern refactor.
+    This route has no team-specific config-resolution logic of its own
+    left -- every team-specific detail lives in that team's own
+    ``BaseExportService`` subclass (``BamawlExportBuilder``,
+    ``KikanExportBuilder``).
     """
-    from repositories.team_import_config_repository import TeamImportConfigRepository
+    strategy_cls = get_export_strategy_class(_current_team_name())
 
-    repo = TeamImportConfigRepository(current_app.config["MHES_DB_PATH"])
-    config = repo.get_by_team_id(session["team_id"])
-    return config["column_mapping"] if config else None
+    if strategy_cls is BamawlExportBuilder:
+        bamawl_mapping = BamawlExportBuilder.resolve_column_mapping(
+            current_app.config["MHES_DB_PATH"], session["team_id"],
+        )
+        if bamawl_mapping:
+            return BamawlExportBuilder(), ExportContext(
+                filepath=build_path, categories=categories, project_name=project_name,
+                created_by=created_by, project_remark=project_remark,
+                column_mapping=bamawl_mapping,
+                template_path=BamawlExportBuilder.template_path(current_app.root_path),
+            )
+    elif strategy_cls is KikanExportBuilder:
+        kikan_mapping = KikanExportBuilder.resolve_column_mapping(
+            current_app.config["MHES_DB_PATH"], session["team_id"],
+        )
+        if kikan_mapping:
+            return KikanExportBuilder(), ExportContext(
+                filepath=build_path, categories=categories, project_name=project_name,
+                created_by=created_by, project_remark=project_remark,
+                column_mapping=kikan_mapping,
+                template_path=KikanExportBuilder.template_path(current_app.root_path),
+            )
 
-
-def _bamawl_template_path() -> str:
-    """Path to Bamawl Team's single official Excel template.
-
-    ``bamawl_import_export_format_filled.xlsx`` is the one workbook
-    used for both import (``services/team_template_validator.py`` accepts
-    an upload structurally matching it) and export (this builds
-    directly on top of it) -- there is deliberately no separate
-    import-only or export-only template file (see
-    ``services/bamawl_export_builder.py`` module docstring).
-    """
-    return os.path.join(
-        current_app.root_path, "simple_resource", "bamawl_import_export_format_filled.xlsx",
+    return DefaultExportStrategy(), ExportContext(
+        filepath=build_path, categories=categories, project_name=project_name,
+        created_by=created_by, project_remark=project_remark,
+        template_config=_team_export_template(),
     )
 
 
@@ -158,23 +180,10 @@ def export_excel():
     os.makedirs(temp_dir, exist_ok=True)
     build_path = os.path.join(temp_dir, build_export_filename(safe_name))
 
-    bamawl_mapping = _bamawl_import_column_mapping() if _is_bamawl_team() else None
+    strategy, context = _select_export_strategy(build_path, project_name, created_by, project_remark, categories)
 
     try:
-        if bamawl_mapping:
-            # Bamawl Team exports onto its own real template workbook
-            # (see services/bamawl_export_builder.py) instead of the
-            # generic from-scratch column-layout builder every other
-            # team uses.
-            build_bamawl_workbook(
-                build_path, categories, bamawl_mapping, _bamawl_template_path(),
-                project_name=project_name,
-            )
-        else:
-            _build_workbook(
-                build_path, project_name, created_by, project_remark, categories,
-                template_config=_team_export_template(),
-            )
+        strategy.build(context)
         with open(build_path, "rb") as f:
             file_bytes = f.read()
     except BamawlExportError as e:
@@ -182,6 +191,11 @@ def export_excel():
         # the template's fixed row block) -- surfaced directly rather
         # than the generic 500 message below.
         logger.warning("Bamawl export rejected for project=%r: %s", project_name, e)
+        return jsonify({"error": str(e)}), 400
+    except KikanExportError as e:
+        # Same reasoning as BamawlExportError above, independently for
+        # KiKan Team's own export template.
+        logger.warning("KiKan export rejected for project=%r: %s", project_name, e)
         return jsonify({"error": str(e)}), 400
     except Exception:
         # Logged with full traceback for diagnosis; the client only ever
