@@ -11,7 +11,7 @@ from utils.permissions import require_login
 from utils.team_storage import team_folders_for_team_id
 
 chatbot_bp = Blueprint("chatbot", __name__)
-# Any logged-in role (Member and above) can use the chatbot.
+# Any logged-in role can use the chatbot.
 chatbot_bp.before_request(require_login)
 
 

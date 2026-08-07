@@ -29,6 +29,7 @@ from services.team_service import (
     update_team,
 )
 from services.user_service import (
+    CREATABLE_ROLES,
     UserDeletionBlockedError,
     UserValidationError,
     create_user,
@@ -132,13 +133,13 @@ def _user_form_defaults(form: dict) -> dict:
     Shared by the GET (blank form) and the POST-with-errors (re-show
     what was submitted, don't make the admin retype everything) paths.
     Password fields are deliberately excluded — never echoed back.
+    Role/Status aren't here at all — Create User has no fields for
+    either; both are fixed server-side (see ``create_user_submit``).
     """
     return {
         "username": form.get("username", ""),
         "email": form.get("email", ""),
         "team_id": form.get("team_id", ""),
-        "role": form.get("role") or "Member",
-        "status": form.get("status") or "Active",
     }
 
 
@@ -149,8 +150,6 @@ def create_user_page() -> str:
     return render_template(
         "admin_user_create.html",
         teams=admin_service.list_teams(db_path),
-        roles=VALID_ROLES,
-        statuses=VALID_STATUSES,
         errors={},
         **_user_form_defaults({}),
     )
@@ -158,7 +157,15 @@ def create_user_page() -> str:
 
 @admin_bp.route("/users/create", methods=["POST"])
 def create_user_submit() -> str:
-    """Validate and create a new user account."""
+    """Validate and create a new user account.
+
+    Role and Status are NOT read from the submitted form at all — the
+    Create User form has no fields for either. Every new account is
+    created as role="Team Manager" (``CREATABLE_ROLES[0]``, the only
+    creatable role) and status="Active", fixed here server-side, so
+    nothing the client sends (or a hand-crafted request omits/tampers
+    with) can influence either value.
+    """
     db_path = current_app.config["MHES_DB_PATH"]
 
     username = request.form.get("username", "")
@@ -166,8 +173,6 @@ def create_user_submit() -> str:
     password = request.form.get("password", "")
     confirm_password = request.form.get("confirm_password", "")
     team_id_raw = request.form.get("team_id", "")
-    role = request.form.get("role") or "Member"
-    status = request.form.get("status") or "Active"
 
     try:
         team_id = int(team_id_raw)
@@ -182,8 +187,8 @@ def create_user_submit() -> str:
             password=password,
             confirm_password=confirm_password,
             team_id=team_id,
-            role=role,
-            status=status,
+            role=CREATABLE_ROLES[0],
+            status="Active",
             performed_by_user_id=session.get("user_id"),
             performed_by_username=session.get("username"),
         )
@@ -191,8 +196,6 @@ def create_user_submit() -> str:
         return render_template(
             "admin_user_create.html",
             teams=admin_service.list_teams(db_path),
-            roles=VALID_ROLES,
-            statuses=VALID_STATUSES,
             errors=e.errors,
             **_user_form_defaults(request.form),
         )
@@ -359,7 +362,7 @@ def edit_user_submit(user_id: int) -> str:
     username = request.form.get("username", "")
     email = request.form.get("email", "")
     team_id_raw = request.form.get("team_id", "")
-    role = request.form.get("role") or "Member"
+    role = request.form.get("role") or user["role"]
     status = request.form.get("status") or "Active"
 
     try:

@@ -40,6 +40,14 @@ _EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 VALID_STATUSES = ("Active", "Inactive")
 
+# Create User may only ever assign "Team Manager" -- Admin accounts are
+# provisioned separately, never through this form. A strict SUBSET of
+# VALID_ROLES (not a separate role system): existing Admin accounts
+# remain fully valid and editable via Edit User, which still validates
+# against the full VALID_ROLES set (see validate_role) -- this
+# restriction applies to account CREATION only.
+CREATABLE_ROLES = ("Team Manager",)
+
 
 class UserValidationError(ValueError):
     """Raised when user input fails validation.
@@ -120,13 +128,26 @@ def validate_team(db_path: str, team_id: int) -> str | None:
 def validate_role(role: str) -> str | None:
     """Return an error message for ``role``, or None if valid.
 
-    Mirrors the ``CHECK(role IN ('Admin', 'Team Manager', 'Member'))``
+    Mirrors the ``CHECK(role IN ('Admin', 'Team Manager'))``
     constraint on the ``users`` table — rejecting an invalid value
     here gives a readable error instead of letting it fail as a raw
     ``sqlite3.IntegrityError`` at the database layer.
     """
     if role not in VALID_ROLES:
         return f"Role must be one of: {', '.join(VALID_ROLES)}."
+    return None
+
+
+def validate_creatable_role(role: str) -> str | None:
+    """Return an error message for ``role``, or None if it's allowed
+    when CREATING a new user (a stricter check than ``validate_role``).
+
+    Used only by ``create_user`` — Edit User continues to validate
+    against the full ``VALID_ROLES`` set via ``validate_role``, so an
+    existing Admin account is unaffected and remains editable.
+    """
+    if role not in CREATABLE_ROLES:
+        return f"Only {', '.join(CREATABLE_ROLES)} can be assigned when creating a user."
     return None
 
 
@@ -267,7 +288,9 @@ def create_user(
         confirm_password: Must match ``password`` exactly, or this is
             rejected before any other validation runs its DB lookups.
         team_id: Id of the team this account belongs to.
-        role: One of ``repositories.user_repository.VALID_ROLES``.
+        role: One of ``CREATABLE_ROLES`` (a subset of
+            ``repositories.user_repository.VALID_ROLES`` -- currently
+            just "Team Manager").
         status: 'Active' or 'Inactive'.
         performed_by_user_id: The acting Admin's id, for the audit log
             entry only.
@@ -279,8 +302,9 @@ def create_user(
 
     Raises:
         UserValidationError: If any field is invalid (including a
-            password/confirm-password mismatch, or username/email
-            uniqueness) — nothing is written in that case.
+            password/confirm-password mismatch, username/email
+            uniqueness, or a ``role`` outside ``CREATABLE_ROLES`` —
+            e.g. "Admin") — nothing is written in that case.
     """
     clean_username = (username or "").strip()
     clean_email = (email or "").strip() or None
@@ -302,6 +326,16 @@ def create_user(
         )
     except UserValidationError as e:
         errors.update(e.errors)
+
+    # A role can pass validate_role() (it's a real, generally-valid
+    # role) and still be disallowed specifically at creation time (e.g.
+    # "Admin") -- checked in addition to, not instead of, the general
+    # check above, and only overrides "role" in errors if it wasn't
+    # already flagged as an unrecognized role entirely.
+    if "role" not in errors:
+        creatable_role_error = validate_creatable_role(role)
+        if creatable_role_error:
+            errors["role"] = creatable_role_error
 
     if errors:
         raise UserValidationError(errors)

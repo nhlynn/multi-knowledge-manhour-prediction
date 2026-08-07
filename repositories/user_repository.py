@@ -13,7 +13,7 @@ from repositories.base_repository import BaseRepository
 
 logger = logging.getLogger(__name__)
 
-VALID_ROLES = ("Admin", "Team Manager", "Member")
+VALID_ROLES = ("Admin", "Team Manager")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     team_id INTEGER NOT NULL REFERENCES teams(id),
-    role TEXT NOT NULL CHECK(role IN ('Admin', 'Team Manager', 'Member')),
+    role TEXT NOT NULL CHECK(role IN ('Admin', 'Team Manager')),
     created_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'Active' CHECK(status IN ('Active', 'Inactive')),
     last_login TEXT,
@@ -122,7 +122,7 @@ class UserRepository(BaseRepository):
             username: Unique login name.
             password_hash: Hashed password (never pass plaintext here).
             team_id: Id of the team this user belongs to.
-            role: One of ``"Admin"``, ``"Team Manager"``, ``"Member"``.
+            role: One of ``"Admin"``, ``"Team Manager"``.
             created_at: ISO datetime string.
             email: Optional email address.
             status: 'Active' or 'Inactive'. Defaults to 'Active', same

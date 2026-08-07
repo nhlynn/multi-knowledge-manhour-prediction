@@ -78,26 +78,6 @@
                 {% if errors.team_id %}<div class="invalid-feedback">{{ errors.team_id }}</div>{% endif %}
             </div>
 
-            <div class="mb-3">
-                <label class="form-label" for="userRole">Role <span class="text-danger">*</span></label>
-                <select id="userRole" name="role" class="form-select {{ 'is-invalid' if errors.role }}" required>
-                    {% for r in roles %}
-                    <option value="{{ r }}" {{ 'selected' if role == r else '' }}>{{ r }}</option>
-                    {% endfor %}
-                </select>
-                {% if errors.role %}<div class="invalid-feedback">{{ errors.role }}</div>{% endif %}
-            </div>
-
-            <div class="mb-3">
-                <label class="form-label" for="userStatus">Status <span class="text-danger">*</span></label>
-                <select id="userStatus" name="status" class="form-select {{ 'is-invalid' if errors.status }}">
-                    {% for s in statuses %}
-                    <option value="{{ s }}" {{ 'selected' if status == s else '' }}>{{ s }}</option>
-                    {% endfor %}
-                </select>
-                {% if errors.status %}<div class="invalid-feedback">{{ errors.status }}</div>{% endif %}
-            </div>
-
             <div class="d-flex gap-2">
                 <button type="submit" class="btn btn-primary" id="createUserSubmit">
                     <i class="bi bi-check-lg me-1"></i>Create User
@@ -115,16 +95,18 @@
 (function() {
     var createSubmitBtn = document.getElementById('createUserSubmit');
 
-    // Centralizes the six independent "is this field currently valid"
+    // Centralizes the five independent "is this field currently valid"
     // flags this form tracks (Username/Email/Password/Confirm
-    // Password/Team/Role). Each field calls setValid(name, bool)
+    // Password/Team). Each field calls setValid(name, bool)
     // whenever its own state changes; the Create button is
     // recalculated the same way every time, from every field's latest
     // known value — no call site has to remember to also touch the
     // button itself. This is purely a client-side UX guard — the
     // server still fully re-validates every field on submit exactly as
     // before (see routes/admin.py::create_user_submit), so nothing
-    // here changes what's actually accepted.
+    // here changes what's actually accepted. Role/Status aren't
+    // tracked here at all — there are no fields for either; both are
+    // fixed server-side.
     var FormValidationManager = (function() {
         var fields = {
             username: true,
@@ -132,7 +114,6 @@
             password: false,
             confirmPassword: true,
             team: false,
-            role: true,
         };
         function setValid(name, isValid) {
             fields[name] = isValid;
@@ -271,23 +252,14 @@
         },
     });
 
-    // Team has an empty placeholder option (no team picked yet); Role
-    // always has a real value selected (no empty option), so it's
-    // effectively always "selected" — checked anyway for correctness
-    // rather than assumed.
+    // Team has an empty placeholder option (no team picked yet).
     var teamSelect = document.getElementById('userTeam');
-    var roleSelect = document.getElementById('userRole');
 
     function updateTeamState() {
         FormValidationManager.setValid('team', !!teamSelect.value);
     }
-    function updateRoleState() {
-        FormValidationManager.setValid('role', !!roleSelect.value);
-    }
     teamSelect.addEventListener('change', updateTeamState);
-    roleSelect.addEventListener('change', updateRoleState);
     updateTeamState();
-    updateRoleState();
 
     document.getElementById('createUserForm').addEventListener('submit', function() {
         window.MHES.showLoading('Creating user...');

@@ -11,7 +11,7 @@ from utils.pagination import parse_page_param, total_pages_for
 from utils.permissions import require_login
 
 preview_bp = Blueprint("preview", __name__)
-# Any logged-in role (Member and above) can create/preview estimates.
+# Any logged-in role can create/preview estimates.
 preview_bp.before_request(require_login)
 
 

@@ -61,7 +61,7 @@ from utils.permissions import require_login
 logger = logging.getLogger(__name__)
 
 export_bp = Blueprint("export", __name__)
-# Any logged-in role (Member and above) can export results.
+# Any logged-in role can export results.
 export_bp.before_request(require_login)
 
 

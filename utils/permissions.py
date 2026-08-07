@@ -15,7 +15,7 @@ login/home; JSON/AJAX callers get a 401/403 JSON body instead):
 This module only decides *who* is allowed to reach a view. It never
 touches what a view does once let through — no business logic here.
 
-Roles (least to most privileged): "Member" < "Team Manager" < "Admin".
+Roles (least to most privileged): "Team Manager" < "Admin".
 See ``repositories.user_repository.VALID_ROLES`` for the canonical list.
 """
 
