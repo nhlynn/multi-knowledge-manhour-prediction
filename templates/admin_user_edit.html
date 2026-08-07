@@ -102,12 +102,42 @@
                 <button type="submit" class="btn btn-primary" id="editUserSubmit">
                     <i class="bi bi-check-lg me-1"></i>Save Changes
                 </button>
-                <a href="{{ url_for('admin.admin_reset_password_page', user_id=user.id) }}" class="btn btn-outline-secondary">
-                    <i class="bi bi-key me-1"></i>Reset Password
-                </a>
+                <button type="button" class="btn btn-outline-secondary" id="sendResetLinkBtn"
+                        data-bs-toggle="modal" data-bs-target="#sendResetLinkModal">
+                    <i class="bi bi-envelope me-1"></i>Send Reset Password Link
+                </button>
                 <a href="{{ url_for('admin.list_users') }}" class="btn btn-outline-secondary">Cancel</a>
             </div>
         </form>
+
+        <form method="post" id="sendResetLinkForm"
+              action="{{ url_for('admin.admin_send_reset_link', user_id=user.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        </form>
+    </div>
+</div>
+
+<!-- Send Reset Password Link confirmation modal -->
+<div class="modal fade" id="sendResetLinkModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning-subtle">
+                <h5 class="modal-title"><i class="bi bi-envelope me-2"></i>Send Reset Password Link</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-0">
+                    Send a password reset link for <strong>{{ user.username }}</strong> to
+                    <strong>your own</strong> registered email address?
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-warning" id="sendResetLinkModalConfirm">
+                    <i class="bi bi-envelope me-1"></i>Send Reset Password Link
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -210,6 +240,11 @@
         var btn = document.getElementById('editUserSubmit');
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+    });
+
+    document.getElementById('sendResetLinkModalConfirm').addEventListener('click', function() {
+        window.MHES.showLoading('Sending reset link...');
+        document.getElementById('sendResetLinkForm').submit();
     });
 })();
 </script>

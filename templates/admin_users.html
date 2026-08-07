@@ -110,9 +110,14 @@
                         <a href="{{ url_for('admin.edit_user_page', user_id=user.id) }}" class="btn btn-sm btn-outline-primary">
                             <i class="bi bi-pencil me-1"></i>Edit
                         </a>
-                        <a href="{{ url_for('admin.admin_reset_password_page', user_id=user.id) }}" class="btn btn-sm btn-outline-secondary">
-                            <i class="bi bi-key me-1"></i>Reset Password
-                        </a>
+                        <form method="post" action="{{ url_for('admin.admin_send_reset_link', user_id=user.id) }}"
+                              class="d-inline user-reset-link-form">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="button" class="btn btn-sm btn-outline-secondary user-reset-link-btn"
+                                    data-username="{{ user.username }}">
+                                <i class="bi bi-envelope me-1"></i>Send Reset Password Link
+                            </button>
+                        </form>
                         {% if user.id == current_user_id %}
                         <button type="button" class="btn btn-sm btn-outline-danger" disabled
                                 title="You cannot delete your own account.">
@@ -178,6 +183,30 @@
     {% endif %}
 </div>
 
+<!-- Send Reset Password Link confirmation modal -->
+<div class="modal fade" id="sendResetLinkModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning-subtle">
+                <h5 class="modal-title"><i class="bi bi-envelope me-2"></i>Send Reset Password Link</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-0">
+                    Send a password reset link for <strong id="sendResetLinkModalName"></strong> to
+                    <strong>your own</strong> registered email address?
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-warning" id="sendResetLinkModalConfirm">
+                    <i class="bi bi-envelope me-1"></i>Send Reset Password Link
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Delete User confirmation modal -->
 <div class="modal fade" id="deleteUserModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
@@ -207,6 +236,27 @@
 (function() {
     document.getElementById('userFilterForm').addEventListener('submit', function() {
         window.MHES.showLoading('Searching...');
+    });
+
+    var resetLinkModalEl = document.getElementById('sendResetLinkModal');
+    var resetLinkModal = new bootstrap.Modal(resetLinkModalEl);
+    var resetLinkModalName = document.getElementById('sendResetLinkModalName');
+    var resetLinkModalConfirm = document.getElementById('sendResetLinkModalConfirm');
+    var pendingResetLinkForm = null;
+
+    Array.prototype.forEach.call(document.querySelectorAll('.user-reset-link-btn'), function(btn) {
+        btn.addEventListener('click', function() {
+            pendingResetLinkForm = btn.closest('form');
+            resetLinkModalName.textContent = btn.getAttribute('data-username');
+            resetLinkModal.show();
+        });
+    });
+
+    resetLinkModalConfirm.addEventListener('click', function() {
+        if (!pendingResetLinkForm) return;
+        resetLinkModal.hide();
+        window.MHES.showLoading('Sending reset link...');
+        pendingResetLinkForm.submit();
     });
 
     var deleteModalEl = document.getElementById('deleteUserModal');

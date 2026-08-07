@@ -10,10 +10,15 @@ and persistence for team/user mutations all live in
 plus an Admin Reset Password action) are both fully implemented.
 """
 
+import logging
+
 from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, session, url_for
 
 from repositories.user_repository import VALID_ROLES, UserRepository
+from routes.auth import _render_for_token_status
 from services import admin_service
+from services.auth_service import AuthService
+from services.email_service import SmtpConfig
 from services.team_service import (
     VALID_STATUSES,
     TeamDeletionBlockedError,
@@ -26,7 +31,6 @@ from services.team_service import (
 from services.user_service import (
     UserDeletionBlockedError,
     UserValidationError,
-    admin_reset_password,
     create_user,
     delete_user,
     update_user,
@@ -34,6 +38,8 @@ from services.user_service import (
     validate_username,
 )
 from utils.permissions import require_roles_strict
+
+logger = logging.getLogger(__name__)
 
 admin_bp = Blueprint("admin", __name__)
 # Manage Users / Manage Teams (view/create/edit/delete) is an Admin-only
@@ -299,6 +305,22 @@ def _get_user_or_404(user_id: int) -> dict:
     return user
 
 
+def _smtp_config() -> SmtpConfig:
+    """Same SMTP settings ``routes/auth.py::forgot_password`` uses — the
+    Admin-triggered reset link is sent through the identical mail path.
+    """
+    cfg = current_app.config
+    return SmtpConfig(
+        host=cfg.get("SMTP_HOST"),
+        port=cfg.get("SMTP_PORT", 587),
+        username=cfg.get("SMTP_USERNAME"),
+        password=cfg.get("SMTP_PASSWORD"),
+        use_tls=cfg.get("SMTP_USE_TLS", True),
+        opportunistic_tls=cfg.get("SMTP_OPPORTUNISTIC_TLS", True),
+        from_address=cfg.get("MAIL_FROM_ADDRESS", "no-reply@mhes.local"),
+    )
+
+
 @admin_bp.route("/users/<int:user_id>/edit", methods=["GET"])
 def edit_user_page(user_id: int) -> str:
     """Render the Edit User form.
@@ -372,39 +394,59 @@ def edit_user_submit(user_id: int) -> str:
 
 
 @admin_bp.route("/users/<int:user_id>/reset-password", methods=["GET"])
-def admin_reset_password_page(user_id: int) -> str:
-    """Render the Admin Reset Password form for a given user.
+def admin_reset_password_from_email(user_id: int) -> str:
+    """Landing route for the reset-link email's URL
+    (``/admin/users/<user_id>/reset-password?token=...``).
 
-    Completely separate from the self-service Forgot Password flow
-    (``routes/auth.py``'s ``/auth/forgot-password``/``/auth/reset-password``)
-    — no token, no email, this is an Admin directly setting a new
-    password for another account.
+    Validates the token (same ``AuthService.get_reset_token_status``
+    check, same 15-minute expiry, same single-use rule the self-service
+    flow uses) BEFORE rendering anything, then reuses
+    ``routes/auth.py``'s exact same page-selection logic
+    (``_render_for_token_status``) and templates — no new UI. The
+    rendered form still posts to the existing, unmodified
+    ``/auth/reset-password/<token>`` route, so password-update logic
+    is untouched. ``user_id`` only shapes the URL as required; the
+    token alone determines which account is affected.
+    """
+    token = request.args.get("token", "")
+    status = AuthService(db_path=current_app.config["MHES_DB_PATH"]).get_reset_token_status(token)
+    return _render_for_token_status(status, token)
+
+
+@admin_bp.route("/users/<int:user_id>/send-reset-link", methods=["POST"])
+def admin_send_reset_link(user_id: int) -> str:
+    """Generate a password reset link for ``user_id`` and email it to the
+    ACTING ADMIN's own registered email address — never the target
+    user's.
+
+    A single click-and-done action — no intermediate page is rendered,
+    no password is ever set directly here. The token is generated for
+    the *selected* user (so the link, once opened, resets that
+    account's password) via ``AuthService.send_reset_link_for_user``,
+    which stores only the token's hash and expires it after
+    ``PASSWORD_RESET_TOKEN_TTL_MINUTES``. The target account's own
+    email (if any) is never read or used for delivery.
     """
     user = _get_user_or_404(user_id)
-    return render_template("admin_user_reset_password.html", user=user, errors={})
 
+    admin_user = UserRepository(current_app.config["MHES_DB_PATH"]).get_by_id(session.get("user_id"))
+    if not admin_user or not admin_user["email"]:
+        flash("Can't send a reset link: your own admin account has no email on file.", "warning")
+        return redirect(url_for("admin.list_users"))
 
-@admin_bp.route("/users/<int:user_id>/reset-password", methods=["POST"])
-def admin_reset_password_submit(user_id: int) -> str:
-    """Validate and apply an Admin-driven password reset."""
-    user = _get_user_or_404(user_id)
+    AuthService(db_path=current_app.config["MHES_DB_PATH"]).send_reset_link_for_user(
+        user,
+        deliver_to_email=admin_user["email"],
+        reset_url_base=request.url_root,
+        smtp=_smtp_config(),
+        token_ttl_minutes=current_app.config.get("PASSWORD_RESET_TOKEN_TTL_MINUTES", 15),
+    )
 
-    new_password = request.form.get("new_password", "")
-    confirm_password = request.form.get("confirm_password", "")
-
-    try:
-        admin_reset_password(
-            current_app.config["MHES_DB_PATH"],
-            user_id,
-            new_password=new_password,
-            confirm_password=confirm_password,
-            performed_by_user_id=session.get("user_id"),
-            performed_by_username=session.get("username"),
-        )
-    except UserValidationError as e:
-        return render_template("admin_user_reset_password.html", user=user, errors=e.errors)
-
-    flash(f"Password reset for user '{user['username']}'.", "success")
+    logger.info(
+        "Password reset link for user_id=%s (username=%r) sent to admin_id=%s (username=%r)'s own email.",
+        user_id, user["username"], session.get("user_id"), session.get("username"),
+    )
+    flash(f"Password reset link for '{user['username']}' has been sent to your registered email.", "success")
     return redirect(url_for("admin.list_users"))
 
 

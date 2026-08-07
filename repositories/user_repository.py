@@ -265,12 +265,12 @@ class UserRepository(BaseRepository):
     def set_password(self, user_id: int, *, password_hash: str, changed_at: str) -> bool:
         """Set a user's password hash and record when it changed.
 
-        Used by the Admin Reset Password action
-        (``services.user_service.admin_reset_password``) — kept
-        entirely separate from ``update_password`` above (used by the
-        Forgot Password / Reset Password self-service flow via
-        ``AuthService.reset_password``), so that flow's behavior is
-        completely unaffected by this one.
+        Used by the Forgot Password / Reset Password flow
+        (``AuthService.reset_password``) — both the self-service and
+        Admin-triggered ("Send Reset Password Link") paths end up here,
+        since both go through the same token-based reset. Kept entirely
+        separate from ``update_password`` above, which nothing
+        currently calls.
 
         Args:
             user_id: Id of the user to update.

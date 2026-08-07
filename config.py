@@ -103,7 +103,7 @@ class Config:
     )
     MAIL_FROM_ADDRESS: str = os.environ.get("MAIL_FROM_ADDRESS", "no-reply@mhes.local")
     PASSWORD_RESET_TOKEN_TTL_MINUTES: int = int(
-        os.environ.get("PASSWORD_RESET_TOKEN_TTL_MINUTES", "30")
+        os.environ.get("PASSWORD_RESET_TOKEN_TTL_MINUTES", "15")
     )
 
     # Temp data cleanup (APScheduler)

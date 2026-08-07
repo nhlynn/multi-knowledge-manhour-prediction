@@ -1,5 +1,4 @@
-"""Business rules for user account data: validation, Create/Edit User,
-and the Admin Reset Password action.
+"""Business rules for user account data: validation and Create/Edit User.
 
 Backs the User Management screens in ``routes/admin.py`` — routes
 stay thin call+render/redirect layers; validation, uniqueness,
@@ -12,11 +11,11 @@ concerns) — this module owns user *management* mutation/validation
 rules, a distinct responsibility from either (though it reuses
 ``AuthService.hash_password`` rather than duplicating hashing logic).
 
-``admin_reset_password`` below is a completely separate code path from
-``AuthService``'s Forgot Password / Reset Password self-service flow
-(different repository method, different route, no shared state) —
-this module never touches ``AuthService.request_password_reset``/
-``reset_password``, so that flow is unaffected by anything here.
+Password resets (Admin-triggered "Send Reset Password Link" or
+self-service Forgot Password) both go entirely through
+``AuthService.send_reset_link_for_user``/``request_password_reset``/
+``reset_password`` — this module has no password-reset code path of
+its own.
 """
 
 import logging
@@ -461,68 +460,6 @@ def update_user(
             performed_by_user_id, performed_by_username,
         )
     return updated
-
-
-def admin_reset_password(
-    db_path: str,
-    user_id: int,
-    *,
-    new_password: str,
-    confirm_password: str,
-    performed_by_user_id: int | None = None,
-    performed_by_username: str | None = None,
-) -> dict[str, Any]:
-    """Admin-driven password reset: directly set a new password for an
-    account, without the Forgot Password email/token flow.
-
-    This is a distinct code path from ``AuthService.request_password_reset``/
-    ``reset_password`` (self-service Forgot Password) — it writes via
-    ``UserRepository.set_password``, a separate method from the
-    ``update_password`` that flow uses, so nothing here changes that
-    flow's behavior.
-
-    Args:
-        db_path: Path to the shared MHES SQLite database.
-        user_id: The account whose password is being reset.
-        new_password: The new plaintext password (hashed before
-            storage — never stored or logged as given).
-        confirm_password: Must match ``new_password`` exactly.
-        performed_by_user_id: The acting Admin's id, recorded in the
-            audit log entry only.
-        performed_by_username: The acting Admin's username, recorded
-            in the audit log entry only.
-
-    Returns:
-        The affected user's record.
-
-    Raises:
-        ValueError: If no user exists with ``user_id``.
-        UserValidationError: If the passwords don't match or the new
-            password fails the strength policy — nothing is changed
-            in that case.
-    """
-    repo = UserRepository(db_path)
-    user = repo.get_by_id(user_id)
-    if user is None:
-        raise ValueError(f"No user found with id={user_id}")
-
-    errors: dict[str, str] = {}
-    if new_password != confirm_password:
-        errors["confirm_password"] = "Passwords do not match."
-    password_error = validate_password(new_password)
-    if password_error:
-        errors["new_password"] = password_error
-    if errors:
-        raise UserValidationError(errors)
-
-    now = datetime.now().isoformat()
-    repo.set_password(user_id, password_hash=AuthService.hash_password(new_password), changed_at=now)
-
-    logger.info(
-        "User password reset: user_id=%s username=%r by admin_id=%s (username=%r).",
-        user_id, user["username"], performed_by_user_id, performed_by_username,
-    )
-    return repo.get_by_id(user_id)
 
 
 class UserDeletionBlockedError(ValueError):

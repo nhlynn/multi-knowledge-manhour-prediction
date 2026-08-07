@@ -2,10 +2,9 @@
 
 Centralized here so the same rule set governs every place a user
 chooses a new password: Forgot Password's self-service Reset Password
-(``routes/auth.py::reset_password``), Create User
-(``services/user_service.py::create_user``), and Admin Reset Password
-(``services/user_service.py::admin_reset_password``) — all three call
-this single function rather than each hand-rolling their own checks.
+(``routes/auth.py::reset_password``) and Create User
+(``services/user_service.py::create_user``) both call this single
+function rather than each hand-rolling their own checks.
 """
 
 import re

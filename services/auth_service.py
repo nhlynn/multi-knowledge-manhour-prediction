@@ -162,6 +162,61 @@ class AuthService:
             daemon=True,
         ).start()
 
+    def send_reset_link_for_user(
+        self,
+        user: dict[str, Any],
+        *,
+        deliver_to_email: str,
+        reset_url_base: str,
+        smtp: SmtpConfig,
+        token_ttl_minutes: int = 15,
+    ) -> None:
+        """Generate a reset token for ``user`` and email the link to
+        ``deliver_to_email`` — which need not be the account's own
+        email address.
+
+        Unlike ``request_password_reset`` (self-service Forgot
+        Password, which looks up the account BY the submitted email
+        and must stay enumeration-safe against an anonymous caller),
+        this is for an already-authenticated Admin action targeting a
+        specific, already-known account — there's no lookup and no
+        enumeration surface, so none of that flow's constant-time/decoy
+        machinery is needed here. Used by
+        ``routes/admin.py::admin_send_reset_link`` to deliver the link
+        to the acting Admin's own registered email rather than the
+        target user's.
+
+        Args:
+            user: The account record to generate the token for (its
+                ``id`` and ``username``; its own ``email`` is not used).
+            deliver_to_email: Where to actually send the reset email.
+            reset_url_base: Scheme+host to build an absolute reset link
+                from (e.g. ``request.url_root`` from the calling route).
+            smtp: SMTP connection settings.
+            token_ttl_minutes: How long the generated token stays valid.
+        """
+        raw_token = secrets.token_urlsafe(32)
+        now = datetime.now()
+        expires_at = now + timedelta(minutes=token_ttl_minutes)
+        self.reset_tokens.create_token(
+            user_id=user["id"],
+            token_hash=_hash_reset_token(raw_token),
+            expires_at=expires_at.isoformat(),
+            created_at=now.isoformat(),
+        )
+
+        # Admin-facing link: routes/admin.py's GET
+        # /admin/users/<user_id>/reset-password?token=... landing route
+        # (not the self-service /auth/reset-password/<token> path) —
+        # that route validates the token then renders the exact same
+        # existing Reset Password page/templates.
+        reset_link = f"{reset_url_base.rstrip('/')}/admin/users/{user['id']}/reset-password?token={raw_token}"
+        threading.Thread(
+            target=_send_reset_email_safe,
+            args=(smtp, deliver_to_email, user["username"], reset_link, token_ttl_minutes),
+            daemon=True,
+        ).start()
+
     def get_reset_token_status(self, raw_token: str) -> str:
         """Classify a reset token so the caller can show the right page.
 
