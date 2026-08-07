@@ -173,6 +173,7 @@ def validate_user_input(
     status: str = "Active",
     exclude_id: int | None = None,
     require_password: bool = True,
+    require_email: bool = False,
 ) -> None:
     """Validate a full set of user input, raising ``UserValidationError``
     listing every failing field if any check fails.
@@ -182,7 +183,7 @@ def validate_user_input(
             the username/email uniqueness lookups and the team
             existence check).
         username: Login name.
-        email: Optional email address.
+        email: Email address (optional unless ``require_email``).
         password: Plaintext password to validate, or None if not being
             set/changed (see ``require_password``).
         team_id: Id of the team this account belongs to.
@@ -194,6 +195,13 @@ def validate_user_input(
             not an error (e.g. editing an account without changing its
             password) — but if a password IS given, it's still
             strength-checked either way.
+        require_email: If True, a missing/blank ``email`` is itself an
+            error ("Email is required.") — used by ``create_user``
+            (Create User has no way to submit a blank email at all;
+            this is the server-side half of that). Edit User leaves
+            this False, since an existing account's ``email`` column
+            is nullable and this must not force a value onto an
+            account that never had one.
 
     Raises:
         UserValidationError: If any field is invalid, with every
@@ -205,9 +213,14 @@ def validate_user_input(
     if username_error:
         errors["username"] = username_error
 
-    email_error = validate_email(email)
-    if email_error:
-        errors["email"] = email_error
+    if not (email or "").strip():
+        if require_email:
+            errors["email"] = "Email is required."
+        email_error = None
+    else:
+        email_error = validate_email(email)
+        if email_error:
+            errors["email"] = email_error
 
     if password:
         password_error = validate_password(password)
@@ -282,7 +295,9 @@ def create_user(
     Args:
         db_path: Path to the shared MHES SQLite database.
         username: Login name.
-        email: Optional email address.
+        email: Email address — REQUIRED for a new account (unlike Edit
+            User, where an existing account's email stays optional;
+            see ``validate_user_input``'s ``require_email``).
         password: Plaintext password (hashed before storage — never
             stored or logged as given).
         confirm_password: Must match ``password`` exactly, or this is
@@ -302,9 +317,10 @@ def create_user(
 
     Raises:
         UserValidationError: If any field is invalid (including a
-            password/confirm-password mismatch, username/email
-            uniqueness, or a ``role`` outside ``CREATABLE_ROLES`` —
-            e.g. "Admin") — nothing is written in that case.
+            missing email, a password/confirm-password mismatch,
+            username/email uniqueness, or a ``role`` outside
+            ``CREATABLE_ROLES`` — e.g. "Admin") — nothing is written
+            in that case.
     """
     clean_username = (username or "").strip()
     clean_email = (email or "").strip() or None
@@ -323,6 +339,7 @@ def create_user(
             role=role,
             status=status,
             require_password=True,
+            require_email=True,
         )
     except UserValidationError as e:
         errors.update(e.errors)

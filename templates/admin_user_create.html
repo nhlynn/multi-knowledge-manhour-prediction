@@ -33,10 +33,9 @@
             </div>
 
             <div class="mb-3">
-                <label class="form-label" for="userEmail">Email</label>
+                <label class="form-label" for="userEmail">Email <span class="text-danger">*</span></label>
                 <input type="email" id="userEmail" name="email" class="form-control {{ 'is-invalid' if errors.email }}"
-                       value="{{ email }}" maxlength="254" autocomplete="off">
-                <div class="form-text">Optional.</div>
+                       value="{{ email }}" maxlength="254" required autocomplete="off">
                 <div class="form-text" id="userEmailAvailability"></div>
                 {% if errors.email %}<div class="invalid-feedback">{{ errors.email }}</div>{% endif %}
             </div>
@@ -110,7 +109,7 @@
     var FormValidationManager = (function() {
         var fields = {
             username: true,
-            email: true,
+            email: false,
             password: false,
             confirmPassword: true,
             team: false,
@@ -130,8 +129,9 @@
 
     // Shared debounce+fetch+stale-response-guard logic behind both the
     // Username and Email live availability checks below — the two
-    // fields differ only in endpoint, field name, and whether there's
-    // a client-side format check to run before ever calling the API.
+    // fields differ only in endpoint, field name, whether there's a
+    // client-side format check to run before ever calling the API, and
+    // (Email only) whether a blank value is itself invalid.
     function createAvailabilityChecker(options) {
         var input = options.input;
         var hintEl = options.hintEl;
@@ -139,6 +139,8 @@
         var checkUrl = options.checkUrl;
         var formatValidate = options.formatValidate; // optional: (trimmed) -> error string | null
         var notAvailableFallback = options.notAvailableFallback;
+        var required = !!options.required;
+        var requiredMessage = options.requiredMessage || 'This field is required.';
         var timer = null;
         var seq = 0;
 
@@ -147,8 +149,13 @@
             var trimmed = input.value.trim();
 
             if (!trimmed) {
-                setHint(hintEl, '');
-                FormValidationManager.setValid(fieldName, true);
+                if (required) {
+                    setHint(hintEl, '✗ ' + requiredMessage, 'text-danger');
+                    FormValidationManager.setValid(fieldName, false);
+                } else {
+                    setHint(hintEl, '');
+                    FormValidationManager.setValid(fieldName, true);
+                }
                 return;
             }
 
@@ -214,6 +221,8 @@
         checkUrl: '/admin/users/check-email?email=',
         availableMessage: 'Email is available.',
         notAvailableFallback: 'Email is not available.',
+        required: true,
+        requiredMessage: 'Email is required.',
         formatValidate: function(trimmed) {
             return EMAIL_FORMAT_PATTERN.test(trimmed) ? null : 'Invalid email format.';
         },
