@@ -286,6 +286,7 @@ def upload_files() -> str:
         excel_service=_excel_service(),
         embedding_service=_embedding_service(),
         column_mapping=column_mapping,
+        team_name=_current_team_name(),
     )
     for message in result.messages:
         flash(message.text, message.category)
@@ -348,7 +349,9 @@ def reembed_file(filename: str) -> str:
             return redirect(url_for("upload.upload_page"))
 
     try:
-        result = emb.process_excel_file(kb_path, column_mapping=column_mapping)
+        result = emb.process_excel_file(
+            kb_path, column_mapping=column_mapping, team_name=_current_team_name(),
+        )
         flash(
             f"Embeddings regenerated for '{filename}': "
             f"{result['num_vectors']} vectors.",

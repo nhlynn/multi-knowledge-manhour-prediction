@@ -20,26 +20,28 @@ reorganizes *how ``routes/export.py`` picks between them*, not what any
 of them actually do. Every existing export's output is byte-for-byte
 unchanged by this refactor.
 
-Registering SGL Team's or SSD Team's own future export builder means:
-build that builder module the same way Bamawl's/KiKan's already are (a
-``build_sgl_workbook``/``build_ssd_workbook`` function plus its own
-``*ExportError`` and ``BaseExportService`` subclass, all in their own
-dedicated module), and add one line to ``EXPORT_STRATEGY_REGISTRY`` --
-no changes needed to ``services/base_export_service.py``, and only the
-new strategy's own ``ExportContext`` fields need wiring up in
-``routes/export.py``. Not implemented yet, per instruction.
+Registering SSD Team's own future export builder means: build that
+builder module the same way Bamawl's/KiKan's/SGL's already are (a
+``build_ssd_workbook`` function plus its own ``*ExportError`` and
+``BaseExportService`` subclass, all in their own dedicated module),
+and add one line to ``EXPORT_STRATEGY_REGISTRY`` -- no changes needed
+to ``services/base_export_service.py``, and only the new strategy's
+own ``ExportContext`` fields need wiring up in ``routes/export.py``.
 """
 
 from services.base_export_service import BaseExportService, ExportContext
 from services.bamawl_export_builder import BamawlExportBuilder, BamawlExportError
 from services.export_workbook_service import build_workbook
 from services.kikan_export_builder import KikanExportBuilder, KikanExportError
+from services.sgl_export_builder import SglExportBuilder, SglExportError
 
 __all__ = [
     "BamawlExportError",
     "KikanExportError",
+    "SglExportError",
     "BamawlExportBuilder",
     "KikanExportBuilder",
+    "SglExportBuilder",
     "DefaultExportStrategy",
     "EXPORT_STRATEGY_REGISTRY",
     "get_export_strategy_class",
@@ -47,9 +49,8 @@ __all__ = [
 
 
 class DefaultExportStrategy(BaseExportService):
-    """Every team without its own dedicated export builder (SGL Team
-    and SSD Team included, until each gets its own strategy below) --
-    delegates to
+    """Every team without its own dedicated export builder (SSD Team,
+    until it gets its own strategy below) -- delegates to
     ``services/export_workbook_service.py::build_workbook`` (unchanged),
     which builds a fresh workbook from scratch using that team's
     configured column layout (or the built-in default layout, for a
@@ -68,15 +69,14 @@ class DefaultExportStrategy(BaseExportService):
 
 #: Maps a team's exact name (see ``utils/migrations/team_seed.py``) to
 #: its own dedicated export strategy class. A team with no entry here
-#: (every team today except Bamawl Team/KiKan Team) gets
+#: (every team today except Bamawl Team/KiKan Team/SGL Team) gets
 #: ``DefaultExportStrategy`` -- see ``get_export_strategy_class``.
 EXPORT_STRATEGY_REGISTRY: dict[str, type[BaseExportService]] = {
     "Bamawl Team": BamawlExportBuilder,
     "KiKan Team": KikanExportBuilder,
-    # Future team-specific export builders, once each team's own
-    # module defines its own build_*_workbook function analogously to
-    # Bamawl's/KiKan's:
-    #   "SGL Team": SglExportStrategy,
+    "SGL Team": SglExportBuilder,
+    # Future team-specific export builder, once its own module defines
+    # its own build_ssd_workbook function analogously to Bamawl's/KiKan's/SGL's:
     #   "SSD Team": SsdExportStrategy,
 }
 

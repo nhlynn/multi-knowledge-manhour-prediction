@@ -44,6 +44,7 @@ def upload_and_embed_files(
     excel_service: ExcelService,
     embedding_service: EmbeddingService,
     column_mapping: dict[str, Any] | None,
+    team_name: str | None = None,
 ) -> UploadBatchResult:
     """Validate, save, and auto-embed every file in one upload batch.
 
@@ -53,6 +54,10 @@ def upload_and_embed_files(
         excel_service: Already scoped to the current session's team folder.
         embedding_service: Already scoped to the current session's team folder.
         column_mapping: The team's configured Excel column mapping, or None.
+        team_name: The current session's team name, passed straight
+            through to ``EmbeddingService.process_excel_file`` (see its
+            own docstring) — only relevant for a team with a dedicated
+            entry in ``services.import_strategies.CUSTOM_IMPORT_PARSERS``.
 
     Returns:
         Every flash-worthy message produced, in the same order the
@@ -77,7 +82,7 @@ def upload_and_embed_files(
 
         try:
             messages.extend(_save_and_embed_one_file(
-                file, duplicate_action, excel_service, embedding_service, column_mapping,
+                file, duplicate_action, excel_service, embedding_service, column_mapping, team_name,
             ))
             success_count += 1
         except Exception as e:
@@ -96,6 +101,7 @@ def upload_and_embed_files(
 def _save_and_embed_one_file(
     file: FileStorage, duplicate_action: str, excel_service: ExcelService,
     embedding_service: EmbeddingService, column_mapping: dict[str, Any] | None,
+    team_name: str | None = None,
 ) -> list[FlashMessage]:
     """Save one file and attempt to embed it, returning its status message(s).
 
@@ -117,7 +123,9 @@ def _save_and_embed_one_file(
 
     try:
         kb_path = excel_service.get_kb_path(label)
-        result = embedding_service.process_excel_file(kb_path, column_mapping=column_mapping)
+        result = embedding_service.process_excel_file(
+            kb_path, column_mapping=column_mapping, team_name=team_name,
+        )
         messages.append(FlashMessage(
             f"Embeddings ready for {label}: "
             f"{result['num_vectors']} text chunks from "

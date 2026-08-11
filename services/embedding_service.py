@@ -275,6 +275,7 @@ class EmbeddingService:
 
     def process_excel_file(
         self, excel_path: str, column_mapping: dict[str, str] | None = None,
+        team_name: str | None = None,
     ) -> dict[str, Any]:
         """Generate embeddings for an Excel file (all worksheets).
 
@@ -295,12 +296,23 @@ class EmbeddingService:
                 (Phase 7 — see ``services.excel_parser._map_columns``).
                 None (the default) uses the original generic keyword
                 matching, unchanged from before Phase 7.
+            team_name: The current team's name, used only to look up a
+                dedicated nested-JSON parser in
+                ``services.import_strategies.CUSTOM_IMPORT_PARSERS``
+                for a team whose worksheet layout the generic
+                ``column_mapping``-driven parser can't express (e.g.
+                SGL Team's two-row header). Omitting this (the
+                default, ``None``) is completely unaffected — the
+                lookup simply misses and step 1 falls back to the
+                exact same generic ``excel_to_nested_json`` call as
+                before this parameter existed.
 
         Returns:
             Dict with keys: ``filename``, ``categories``,
             ``num_vectors``, ``index_path``, ``embedded_at``.
         """
         from services.excel_parser import excel_to_nested_json, extract_texts_from_nested
+        from services.import_strategies import get_custom_import_parser
 
         if not os.path.isfile(excel_path):
             raise FileNotFoundError(f"Excel file not found: {excel_path}")
@@ -309,7 +321,11 @@ class EmbeddingService:
         index_name = os.path.splitext(filename)[0]
 
         # 1. Convert Excel to nested JSON
-        nested_json = excel_to_nested_json(excel_path, column_mapping=column_mapping)
+        custom_parser = get_custom_import_parser(team_name)
+        if custom_parser:
+            nested_json = custom_parser(excel_path)
+        else:
+            nested_json = excel_to_nested_json(excel_path, column_mapping=column_mapping)
         if not nested_json:
             raise ValueError(f"No data found in {filename}")
 

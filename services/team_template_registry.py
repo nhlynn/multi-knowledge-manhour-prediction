@@ -4,10 +4,11 @@ the single place ``routes/upload.py`` looks up "does the current
 user's team have its own strictly-validated template, and if so,
 which one."
 
-Bamawl Team and KiKan Team have entries today. Adding SGL or SSD's own
-template later means, in that team's own config module (mirroring
+Bamawl Team, KiKan Team, and SGL Team have entries today. Adding SSD's
+own template later means, in that team's own config module (mirroring
 ``utils/migrations/bamawl_import_export_config.py`` /
-``utils/migrations/kikan_import_export_config.py``):
+``utils/migrations/kikan_import_export_config.py`` /
+``utils/migrations/sgl_import_export_config.py``):
 
 1. Define its required worksheet list, header sheet/row, exact
    expected header row, column mapping, and (optionally) a sample
@@ -28,13 +29,14 @@ from services.team_template_validator import TeamTemplateSpec
 def _build_registry() -> dict[str, TeamTemplateSpec]:
     from utils.migrations.bamawl_import_export_config import _build_bamawl_template_spec
     from utils.migrations.kikan_import_export_config import _build_kikan_template_spec
+    from utils.migrations.sgl_import_export_config import _build_sgl_template_spec
 
     return {
         "Bamawl Team": _build_bamawl_template_spec(),
         "KiKan Team": _build_kikan_template_spec(),
-        # Future team-specific templates, once each team's own config
-        # module defines its own spec analogously to Bamawl's/KiKan's:
-        #   "SGL Team": _build_sgl_template_spec(),
+        "SGL Team": _build_sgl_template_spec(),
+        # Future team-specific template, once its own config module
+        # defines its own spec analogously to Bamawl's/KiKan's/SGL's:
         #   "SSD Team": _build_ssd_template_spec(),
     }
 

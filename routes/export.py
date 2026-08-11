@@ -43,9 +43,11 @@ from services.export_strategies import (
     BamawlExportError,
     DefaultExportStrategy,
     KikanExportError,
+    SglExportError,
     get_export_strategy_class,
 )
 from services.kikan_export_builder import KikanExportBuilder
+from services.sgl_export_builder import SglExportBuilder
 from services.export_workbook_service import DEFAULT_EXPORT_TEMPLATE
 from services.gcs_service import (
     GCSError,
@@ -106,17 +108,21 @@ def _select_export_strategy(
     ``services/export_strategies.py``).
 
     A team's own dedicated strategy (looked up by name via
-    ``get_export_strategy_class`` -- Bamawl Team, KiKan Team today)
-    only actually applies once that team's own config is confirmed
-    present (``bamawl_mapping``/``kikan_mapping``, each resolved via
-    that strategy class's own ``resolve_column_mapping``, non-empty) --
-    a team named "Bamawl Team"/"KiKan Team" whose config hasn't been
-    seeded yet still falls back to ``DefaultExportStrategy``, the same
-    safety net this dispatch had before the Strategy Pattern refactor.
-    This route has no team-specific config-resolution logic of its own
-    left -- every team-specific detail lives in that team's own
-    ``BaseExportService`` subclass (``BamawlExportBuilder``,
-    ``KikanExportBuilder``).
+    ``get_export_strategy_class`` -- Bamawl Team, KiKan Team, SGL Team
+    today) only actually applies once that team's own config is
+    confirmed present (``bamawl_mapping``/``kikan_mapping``, each
+    resolved via that strategy class's own ``resolve_column_mapping``,
+    non-empty) -- a team named "Bamawl Team"/"KiKan Team" whose config
+    hasn't been seeded yet still falls back to ``DefaultExportStrategy``,
+    the same safety net this dispatch had before the Strategy Pattern
+    refactor. SGL Team is the exception: its export doesn't use a
+    DB-configured ``column_mapping`` at all (see
+    ``SglExportBuilder``'s own docstring), so it's dispatched
+    unconditionally, with no config-presence gate. This route has no
+    team-specific config-resolution logic of its own left -- every
+    team-specific detail lives in that team's own ``BaseExportService``
+    subclass (``BamawlExportBuilder``, ``KikanExportBuilder``,
+    ``SglExportBuilder``).
     """
     strategy_cls = get_export_strategy_class(_current_team_name())
 
@@ -142,6 +148,12 @@ def _select_export_strategy(
                 column_mapping=kikan_mapping,
                 template_path=KikanExportBuilder.template_path(current_app.root_path),
             )
+    elif strategy_cls is SglExportBuilder:
+        return SglExportBuilder(), ExportContext(
+            filepath=build_path, categories=categories, project_name=project_name,
+            created_by=created_by, project_remark=project_remark,
+            template_path=SglExportBuilder.template_path(current_app.root_path),
+        )
 
     return DefaultExportStrategy(), ExportContext(
         filepath=build_path, categories=categories, project_name=project_name,
@@ -196,6 +208,11 @@ def export_excel():
         # Same reasoning as BamawlExportError above, independently for
         # KiKan Team's own export template.
         logger.warning("KiKan export rejected for project=%r: %s", project_name, e)
+        return jsonify({"error": str(e)}), 400
+    except SglExportError as e:
+        # Same reasoning as BamawlExportError above, independently for
+        # SGL Team's own export template.
+        logger.warning("SGL export rejected for project=%r: %s", project_name, e)
         return jsonify({"error": str(e)}), 400
     except Exception:
         # Logged with full traceback for diagnosis; the client only ever
