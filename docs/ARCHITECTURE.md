@@ -691,19 +691,19 @@ root:
 ai-team-001/
 └── mhes/
      └── bcmm/
-          └── 1001/
+          └── 1002/
                ├── estimate_001.xlsx
                ├── estimate_002.xlsx
 ```
 
-The object path convention is always `mhes/bcmm/1001/{file_name}` (see
+The object path convention is always `mhes/bcmm/1002/{file_name}` (see
 `GCS_EXPORT_PREFIX` / `object_path_for()` in `services/gcs_service.py`).
 
 **Upload flow** (`POST /export/excel`):
 1. `_build_workbook()` writes the workbook to a temporary local file in
    `exports/` (a scratch directory now, not persistent storage).
 2. `upload_excel_to_gcs(local_path, file_name)` uploads it to
-   `mhes/bcmm/1001/{file_name}` and returns that object path.
+   `mhes/bcmm/1002/{file_name}` and returns that object path.
 3. The local temp file is deleted (in a `finally` block, so it's cleaned
    up whether the upload succeeds or fails).
 4. `export_history.file_path` is set to the returned GCS object path;
@@ -735,7 +735,7 @@ writing anything to local disk.
 before this migration have a local absolute path (or `NULL`, for the very
 oldest rows, predating the `file_path` column) in `file_path` instead of
 a GCS object path. `_is_local_path()` in `routes/export.py` distinguishes
-the two by shape (`D:\...` / `/...` vs. `mhes/bcmm/1001/...`), so those
+the two by shape (`D:\...` / `/...` vs. `mhes/bcmm/1002/...`), so those
 older records keep being served straight from local disk, unchanged,
 while every export from now on goes through GCS.
 

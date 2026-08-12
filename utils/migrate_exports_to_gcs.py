@@ -6,7 +6,7 @@ exports/<file_name>, with export_history.file_path storing that local
 absolute path. This script uploads every such file still present on disk
 to the configured GCS bucket, and repoints its export_history.file_path
 at the new GCS object path — the same convention new exports already use
-(mhes/bcmm/1001/<file_name>).
+(mhes/bcmm/1002/<file_name>).
 
 Unlike the automatic migrations in utils/migrations/ (which run on every
 app startup and are safe no-ops), this is deliberately NOT run
@@ -90,7 +90,7 @@ def migrate(dry_run: bool = False, delete_local: bool = False) -> dict[str, int]
             continue
 
         if dry_run:
-            logger.info("[DRY RUN] Would upload: %s -> mhes/bcmm/1001/%s", local_path, file_name)
+            logger.info("[DRY RUN] Would upload: %s -> mhes/bcmm/1002/%s", local_path, file_name)
             counts["migrated"] += 1
             continue
 

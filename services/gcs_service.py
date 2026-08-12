@@ -2,7 +2,7 @@
 
 Generated Excel workbooks are written to a temporary local file, uploaded
 to a private GCS bucket under a fixed folder prefix
-(``mhes/bcmm/1001/<file_name>``), then the local temp file is deleted —
+(``mhes/bcmm/1002/<file_name>``), then the local temp file is deleted —
 the bucket is the only persistent copy afterward. Downloads are served via
 short-lived v4 signed URLs so the bucket never needs to be made public.
 
@@ -29,7 +29,7 @@ from google.cloud import storage
 
 logger = logging.getLogger(__name__)
 
-GCS_EXPORT_PREFIX = "mhes/bcmm/1001"
+GCS_EXPORT_PREFIX = "mhes/bcmm/1002"
 DEFAULT_SIGNED_URL_EXPIRATION_MINUTES = 15
 
 _XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -57,7 +57,7 @@ def object_path_for(file_name: str) -> str:
     """Return the fixed-convention GCS object path for an export file name.
 
     Example: ``object_path_for("estimate_001.xlsx")`` ->
-    ``"mhes/bcmm/1001/estimate_001.xlsx"``.
+    ``"mhes/bcmm/1002/estimate_001.xlsx"``.
     """
     return f"{GCS_EXPORT_PREFIX}/{file_name}"
 
@@ -69,7 +69,7 @@ def is_local_path(path: str) -> bool:
     Export history rows created before the GCS migration store an
     absolute local path in ``file_path`` (e.g. ``"D:\\...\\exports\\foo.xlsx"``
     or ``"/srv/.../foo.xlsx"``); rows created after it store a GCS object
-    path instead (e.g. ``"mhes/bcmm/1001/foo.xlsx"``, no drive letter or
+    path instead (e.g. ``"mhes/bcmm/1002/foo.xlsx"``, no drive letter or
     leading slash). Shared by the export routes and the one-off
     ``utils/migrate_exports_to_gcs.py`` backfill script so both agree on
     which rows still need migrating.
@@ -121,7 +121,7 @@ def upload_excel_to_gcs(local_file_path: str, file_name: str) -> str:
         file_name: Name to store the file as, e.g. ``"estimate_001.xlsx"``.
 
     Returns:
-        The GCS object path, e.g. ``"mhes/bcmm/1001/estimate_001.xlsx"``
+        The GCS object path, e.g. ``"mhes/bcmm/1002/estimate_001.xlsx"``
         — this is what gets saved in ``export_history.file_path`` (not a
         ``gs://`` URI).
 
@@ -161,7 +161,7 @@ def generate_signed_download_url(
 
     Args:
         file_path: The GCS object path, e.g.
-            ``"mhes/bcmm/1001/estimate_001.xlsx"`` (as stored in
+            ``"mhes/bcmm/1002/estimate_001.xlsx"`` (as stored in
             ``export_history.file_path``).
         download_name: If given, forces the browser to save the download
             under this filename (via a response-content-disposition

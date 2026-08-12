@@ -461,7 +461,7 @@ records where a file is and what it contains.
 | `export_date` | TEXT | When the export was generated (ISO datetime string) |
 | `file_name` | TEXT (not null) | Name of the generated Excel file as saved/uploaded |
 | `file_url` | TEXT | URL used to download the file |
-| `file_path` | TEXT, nullable | Where the file actually lives: a GCS object path (`mhes/bcmm/1001/...`) for exports created after the Google Cloud Storage migration, or a local absolute path for older records (see `docs/ARCHITECTURE.md` §5a) |
+| `file_path` | TEXT, nullable | Where the file actually lives: a GCS object path (`mhes/bcmm/1002/...`) for exports created after the Google Cloud Storage migration, or a local absolute path for older records (see `docs/ARCHITECTURE.md` §5a) |
 | `file_size` | INTEGER | Size of the generated file, in bytes |
 | `total_tasks` | INTEGER | Total number of tasks across all categories in the export |
 | `total_hours` | REAL | Total estimated hours across all tasks in the export |
