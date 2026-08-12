@@ -51,6 +51,13 @@ _TASK_HEADER = "項目"
 _PHASE_GROUP_HEADER = "工数（人時間）"
 _WORK_DETAIL_HEADER = "作業詳細"
 
+# Column B (no row-2 header text of its own) holds each labeled
+# block's section heading (e.g. "ユーザマスタ", "部署マスター",
+# "予算実績管理", "その他") on that block's own header row -- fixed,
+# hardcoded structural knowledge about this one template, same as
+# _MAIN_HEADER_ROW/_PHASE_LABEL_ROW above.
+_BLOCK_LABEL_COL = 2
+
 
 def sgl_excel_to_nested_json(excel_path: str) -> list[dict[str, Any]]:
     """Convert SGL Team's detail worksheet into the same nested JSON
@@ -130,8 +137,13 @@ def sgl_excel_to_nested_json(excel_path: str) -> list[dict[str, Any]]:
 
     all_categories: dict[str, dict[str, Any]] = {}
     current_category = ""
+    current_block = ""
 
     for row in range(_DATA_START_ROW, ws.max_row + 1):
+        block_val = ws.cell(row=row, column=_BLOCK_LABEL_COL).value
+        if block_val is not None and str(block_val).strip():
+            current_block = str(block_val).strip()
+
         category_val = ws.cell(row=row, column=category_col).value
         if category_val is not None and str(category_val).strip():
             current_category = str(category_val).strip()
@@ -154,7 +166,9 @@ def sgl_excel_to_nested_json(excel_path: str) -> list[dict[str, Any]]:
             wd_val = ws.cell(row=row, column=work_detail_col).value
             row_work_detail = str(wd_val).strip() if wd_val is not None else ""
 
-        _add_task_activities(all_categories, current_category, task, row_activities, row_work_detail)
+        _add_task_activities(
+            all_categories, current_category, task, row_activities, row_work_detail, current_block,
+        )
 
     result = _build_nested_output(all_categories)
     _log_conversion_summary(excel_path, result)
@@ -191,17 +205,30 @@ def _add_task_activities(
     task: str,
     row_activities: list[tuple[str, float]],
     row_work_detail: str = "",
+    block: str = "",
 ) -> None:
-    """Fold one task row's phase activities (and 作業詳細 text, if any)
-    into ``all_categories``, creating the category/task entries as
-    needed -- same accumulator shape
+    """Fold one task row's phase activities (作業詳細 text, and its
+    section block label, if any) into ``all_categories``, creating the
+    category/task entries as needed -- same accumulator shape
     ``services.excel_parser._process_phases_row`` builds, plus SGL's
-    own ``work_detail`` field.
+    own ``work_detail`` and ``block`` fields.
+
+    ``block`` (column B's section heading -- "ユーザマスタ",
+    "部署マスター", "予算実績管理", "その他") is a coarser grouping than
+    ``category`` (区分, column C's finer-grained sub-classification):
+    every task physically sits under exactly one block on the sheet,
+    so this records which one it came from -- this is what lets
+    ``services/sgl_export_builder.py`` write a re-exported task back
+    into its OWN block's rows rather than any arbitrary writable row
+    on the sheet (which would silently move it into a different
+    block's visible section).
 
     A task spanning multiple rows accumulates ``row_work_detail`` from
     each row it appears on, joined by newline, in row order -- mirrors
     how a single task's phase-hour activities themselves already
-    accumulate across its rows.
+    accumulate across its rows. ``block`` is set once, from the first
+    row a task is seen on (a task never spans two different blocks in
+    this template's layout).
     """
     cat_slug = _slugify(category)
     task_slug = _slugify(task)
@@ -213,7 +240,8 @@ def _add_task_activities(
     task_key = f"{cat_slug}_{task_slug}"
     if task_key not in cat_data["tasks"]:
         cat_data["tasks"][task_key] = {
-            "task": task, "buffer_hours": 0.0, "activities": [], "work_detail": "",
+            "task": task, "buffer_hours": 0.0, "activities": [],
+            "work_detail": "", "block": block,
         }
     task_data = cat_data["tasks"][task_key]
 

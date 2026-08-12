@@ -147,6 +147,12 @@ _PHASE_GROUP_HEADER = "工数（人時間）"
 _TOTAL_HOURS_HEADER = "合計\n工数"
 _TOTAL_AMOUNT_HEADER = "合計\n金額"
 
+# Column B (no row-2 header text of its own) holds each labeled
+# block's section heading on that block's own header row -- same fixed
+# structural knowledge services/sgl_import_parser.py's own
+# _BLOCK_LABEL_COL uses.
+_BLOCK_LABEL_COL = 2
+
 _SUMMARY_SHEET = "見積・金額サマリ"
 _SUMMARY_TITLE_CELL = "A1"
 
@@ -197,29 +203,40 @@ def _resolve_phase_columns(ws, phase_group_col: int) -> list[tuple[str, int]]:
     return phase_columns
 
 
-def _discover_writable_rows(ws, total_hours_col: int) -> list[int]:
-    """Discover every genuine task row in the sheet, in row order --
-    the union of two things a row can be:
+def _discover_writable_rows_by_block(
+    ws, total_hours_col: int,
+) -> tuple[dict[str, list[int]], list[int]]:
+    """Discover every genuine task row in the sheet, grouped by which
+    named block (column B's own section heading, e.g. "ユーザマスタ")
+    it physically sits under -- unlike the old flat discovery, this
+    lets ``build_sgl_workbook`` write each task back into ITS OWN
+    block's rows, so a re-exported その他 task can never land under
+    ユーザマスタ (or any other block) purely because of list-ordering.
 
-    1. A row with its OWN single-row, horizontal
-       ``=SUM(<col><row>:<col><row>)`` 合計工数 formula (e.g. row 20's
-       ``=SUM(H20:M20)``) -- the shape every task row that has its own
-       auto-totaling formula carries, whether inside one of the
-       template's labeled blocks or in one of the "extra" unlabeled
-       rows the template also provides for overflow (rows 20–23 in the
-       official template).
-    2. A row covered by a BLOCK's own vertical subtotal formula range
-       (e.g. row 4's ``=SUM(N5:N6)`` covers rows 5 AND 6) -- some of a
-       block's own rows (e.g. row 6) are blank "buffer" rows with no
-       individual total formula of their own, but the block's subtotal
-       already accounts for them, so they're still real, writable
-       capacity for that block, not filler to skip.
+    Returns ``(block_rows, unassigned_rows)``:
+
+    - ``block_rows``: ``{block_label: [row, row, ...]}``, in row order,
+      for every row covered by that block's own vertical subtotal
+      formula (e.g. row 4's ``=SUM(N5:N6)`` -> block label read from
+      B4, rows 5 and 6 both belong to it -- including a blank "buffer"
+      row like row 6 that has no individual formula of its own, since
+      the block's subtotal already accounts for it as real capacity).
+    - ``unassigned_rows``: rows with their OWN single-row, horizontal
+      ``=SUM(<col><row>:<col><row>)`` formula that are NOT covered by
+      any block's subtotal range -- the template's "extra" overflow
+      rows (rows 20–23 in the official template) provided for a
+      project needing more task rows than the labeled blocks alone
+      hold. Used as a shared fallback pool: for a task whose own block
+      is full, or whose block can't be determined at all (e.g. data
+      imported before ``block`` existed on the task record).
 
     Every management-overhead/rollup row's formula (``=N18``,
     ``=(SUM(N4,N7,N10,N14)*20%)``, ``=H4+H7+H10+H14``, ...) matches
     neither shape, so none of them is ever mistaken for a task row.
     """
-    rows: set[int] = set()
+    block_ranges: dict[int, tuple[int, int]] = {}  # header_row -> (start, end)
+    self_formula_rows: set[int] = set()
+
     for row in range(4, ws.max_row + 1):
         formula = ws.cell(row=row, column=total_hours_col).value
         if not formula:
@@ -229,10 +246,27 @@ def _discover_writable_rows(ws, total_hours_col: int) -> list[int]:
             continue
         start_row, end_row = int(match.group(1)), int(match.group(2))
         if start_row == row and end_row == row:
-            rows.add(row)  # this row's own per-row total formula
+            self_formula_rows.add(row)
         else:
-            rows.update(range(start_row, end_row + 1))  # a block subtotal -- claim its whole range
-    return sorted(rows)
+            block_ranges[row] = (start_row, end_row)
+
+    row_to_block: dict[int, str] = {}
+    block_rows: dict[str, list[int]] = {}
+    for header_row, (start_row, end_row) in block_ranges.items():
+        label_val = ws.cell(row=header_row, column=_BLOCK_LABEL_COL).value
+        label = str(label_val).strip() if label_val is not None and str(label_val).strip() else None
+        if label is None:
+            continue  # a subtotal range with no block label -- can't be targeted by name
+        rows = list(range(start_row, end_row + 1))
+        block_rows.setdefault(label, []).extend(rows)
+        for r in rows:
+            row_to_block[r] = label
+
+    unassigned_rows = sorted(r for r in self_formula_rows if r not in row_to_block)
+    for label in block_rows:
+        block_rows[label].sort()
+
+    return block_rows, unassigned_rows
 
 
 def _phase_value(activities: list[dict[str, Any]], label: str) -> float:
@@ -394,13 +428,15 @@ def build_sgl_workbook(
             f"cannot populate '{SGL_SHEET_NAME}'."
         )
 
-    writable_rows = _discover_writable_rows(ws, total_hours_col)
-    if not writable_rows:
+    block_rows, unassigned_rows = _discover_writable_rows_by_block(ws, total_hours_col)
+    all_writable_rows = sorted(set().union(*block_rows.values(), unassigned_rows)) \
+        if block_rows or unassigned_rows else []
+    if not all_writable_rows:
         raise SglExportError(
             f"SGL Team's export template has no recognizable task rows in "
             f"'{SGL_SHEET_NAME}'; cannot populate it."
         )
-    capacity = len(writable_rows)
+    capacity = len(all_writable_rows)
 
     tasks_with_category = [
         (cat.get("category", ""), task) for cat in categories for task in cat.get("tasks", [])
@@ -412,6 +448,36 @@ def build_sgl_workbook(
             f"reduce the number of selected functions, or update the template."
         )
 
+    # Assign each task to a row from its OWN block's pool first (the
+    # block label recorded on the task at import time -- see
+    # services/sgl_import_parser.py's own "block" field) -- so a
+    # re-exported その他 task is written back under その他's rows, never
+    # under ユーザマスタ or any other block, purely by list-ordering
+    # coincidence. Only when a task's own block has no room left (or
+    # its block is unknown/unrecognized, e.g. data imported before
+    # this field existed) does it fall back to the template's shared
+    # "extra" overflow rows (unassigned_rows) -- exactly the slack
+    # capacity those unlabeled rows exist for. A task never spills
+    # into a DIFFERENT named block's rows under any circumstance.
+    block_pools = {label: list(rows) for label, rows in block_rows.items()}
+    overflow_pool = list(unassigned_rows)
+    assignments: list[tuple[str, dict[str, Any], int]] = []
+    for category, task in tasks_with_category:
+        task_block = str(task.get("block") or "").strip()
+        pool = block_pools.get(task_block) if task_block else None
+        if pool:
+            row = pool.pop(0)
+        elif overflow_pool:
+            row = overflow_pool.pop(0)
+        else:
+            raise SglExportError(
+                f"Function '{task.get('task', '')}' belongs to block "
+                f"'{task_block or '(unknown)'}', but that block's rows are full and "
+                f"SGL Team's export template's shared overflow rows are also full -- "
+                f"reduce the number of selected functions, or update the template."
+            )
+        assignments.append((category, task, row))
+
     # Clear every writable row first (category/priority/status/task/
     # phase hours/remarks/作業詳細) -- so a row not used by this export's
     # selection can never retain the template's own sample data.
@@ -419,7 +485,7 @@ def build_sgl_workbook(
     # running row-number column, and every SUM/rate formula are never
     # touched.
     phase_col_indexes = [idx for _label, idx in phase_columns]
-    for row in writable_rows:
+    for row in all_writable_rows:
         _set_cell(ws, row, category_col, None)
         _set_cell(ws, row, task_col, None)
         _set_cell(ws, row, priority_col, None)
@@ -429,7 +495,7 @@ def build_sgl_workbook(
         for col in phase_col_indexes:
             _set_cell(ws, row, col, None)
 
-    for (category, task), row in zip(tasks_with_category, writable_rows):
+    for category, task, row in assignments:
         activities = task.get("activities", []) or []
 
         _set_cell(ws, row, category_col, category)
