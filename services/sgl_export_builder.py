@@ -88,12 +88,51 @@ from typing import Any
 
 import openpyxl
 from openpyxl.cell.cell import MergedCell
+from openpyxl.utils import get_column_letter
 
 from services.base_export_service import BaseExportService, ExportContext
 from services.excel_parser import _normalize_header, _safe_float
 from services.sgl_import_parser import SGL_SHEET_NAME
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_legacy_workbook_bloat(wb: openpyxl.Workbook) -> None:
+    """Strip orphaned Defined Names and External Links from ``wb``
+    before it's ever saved.
+
+    SGL Team's real internal template
+    (``simple_resource/sgl_import_export_format.xlsx``) is an old
+    corporate workbook that has accumulated thousands of "zombie"
+    Defined Names and dozens of External Link references over years of
+    copy-pasting between unrelated spreadsheets — none of them are
+    used by any formula on either of this workbook's own two sheets
+    ("詳細見積_マスタと予実比較" / "見積・金額サマリ"). ``openpyxl``
+    preserves both verbatim on every load→save round-trip by default,
+    so without this step every single SGL export (and the sanitized
+    ``import/sgl/sgl_import_template.xlsx`` built by
+    ``import/sgl/build_sample_template.py``) silently balloons in size
+    and can trigger Excel's "we found a problem with some content"
+    repair prompt on open, even though this module never touches
+    those names/links itself.
+
+    Safe to call unconditionally: a template that's already clean (0
+    defined names, 0 external links) is a no-op. Only ever call this
+    on the in-memory ``Workbook`` this module just loaded and is about
+    to populate/save — never on ``template_path`` itself.
+    """
+    removed_names = len(wb.defined_names)
+    removed_links = len(wb._external_links)
+    if not removed_names and not removed_links:
+        return
+    wb.defined_names.clear()
+    wb._external_links = []
+    logger.info(
+        "Stripped %d orphaned defined name(s) and %d external link(s) "
+        "from SGL Team's export template before populating it.",
+        removed_names, removed_links,
+    )
+
 
 _MAIN_HEADER_ROW = 2
 _PHASE_LABEL_ROW = 3
@@ -103,8 +142,10 @@ _TASK_HEADER = "項目"
 _PRIORITY_HEADER = "優先度/難易度"
 _STATUS_HEADER = "ステータス"
 _REMARKS_HEADER = "備考"
+_WORK_DETAIL_HEADER = "作業詳細"
 _PHASE_GROUP_HEADER = "工数（人時間）"
 _TOTAL_HOURS_HEADER = "合計\n工数"
+_TOTAL_AMOUNT_HEADER = "合計\n金額"
 
 _SUMMARY_SHEET = "見積・金額サマリ"
 _SUMMARY_TITLE_CELL = "A1"
@@ -204,6 +245,44 @@ def _phase_value(activities: list[dict[str, Any]], label: str) -> float:
     return 0.0
 
 
+def _ensure_row_totals(
+    ws,
+    row: int,
+    phase_columns: list[tuple[str, int]],
+    total_hours_col: int,
+    total_amount_col: int | None,
+) -> None:
+    """Add this row's own 合計工数/合計金額 formulas if it doesn't
+    already have one of its own (see the call site in
+    ``build_sgl_workbook`` for why some discovered writable rows never
+    had one to begin with).
+
+    Mirrors the exact formula shape every other row in this template
+    already uses -- ``=SUM(<first phase col><row>:<last phase
+    col><row>)`` for 合計工数, and ``=(<col1><row>*S$3)+(<col2><row>*S$4)+...``
+    for 合計金額, where each phase column's unit price lives in column S
+    at a fixed row offset matching that phase's left-to-right position
+    (要件定義→S3, 設計→S4, 開発→S5, テスト→S6, クラウド対応→S7,
+    その他→S8) -- derived positionally from ``phase_columns`` rather
+    than hardcoded, so a template with reordered/added/removed phase
+    columns is still handled correctly.
+    """
+    existing = ws.cell(row=row, column=total_hours_col).value
+    if existing:
+        return  # this row already has its own formula -- never overwrite it
+
+    first_letter = get_column_letter(phase_columns[0][1])
+    last_letter = get_column_letter(phase_columns[-1][1])
+    ws.cell(row=row, column=total_hours_col).value = f"=SUM({first_letter}{row}:{last_letter}{row})"
+
+    if total_amount_col:
+        terms = [
+            f"({get_column_letter(col_idx)}{row}*S${3 + i})"
+            for i, (_label, col_idx) in enumerate(phase_columns)
+        ]
+        ws.cell(row=row, column=total_amount_col).value = "=" + "+".join(terms)
+
+
 def _set_cell(ws, row: int, col: int | None, value: Any) -> None:
     """Write ``value`` to (row, col), silently skipping a read-only
     ``MergedCell`` placeholder (a non-anchor position within a merged
@@ -284,6 +363,7 @@ def build_sgl_workbook(
         raise SglExportError(f"SGL Team's export template file is missing: {template_path}")
 
     wb = openpyxl.load_workbook(template_path)
+    _strip_legacy_workbook_bloat(wb)
     if SGL_SHEET_NAME not in wb.sheetnames:
         raise SglExportError(
             f"SGL Team's export template is missing the required '{SGL_SHEET_NAME}' worksheet."
@@ -296,8 +376,10 @@ def build_sgl_workbook(
     priority_col = headers.get(_PRIORITY_HEADER)
     status_col = headers.get(_STATUS_HEADER)
     remarks_col = headers.get(_REMARKS_HEADER)
+    work_detail_col = headers.get(_WORK_DETAIL_HEADER)
     phase_group_col = headers.get(_PHASE_GROUP_HEADER)
     total_hours_col = headers.get(_TOTAL_HOURS_HEADER)
+    total_amount_col = headers.get(_TOTAL_AMOUNT_HEADER)
 
     if not (category_col and task_col and phase_group_col and total_hours_col):
         raise SglExportError(
@@ -331,7 +413,7 @@ def build_sgl_workbook(
         )
 
     # Clear every writable row first (category/priority/status/task/
-    # phase hours/remarks) -- so a row not used by this export's
+    # phase hours/remarks/作業詳細) -- so a row not used by this export's
     # selection can never retain the template's own sample data.
     # Column B's block labels, each block's own subtotal row, the
     # running row-number column, and every SUM/rate formula are never
@@ -343,6 +425,7 @@ def build_sgl_workbook(
         _set_cell(ws, row, priority_col, None)
         _set_cell(ws, row, status_col, None)
         _set_cell(ws, row, remarks_col, None)
+        _set_cell(ws, row, work_detail_col, None)
         for col in phase_col_indexes:
             _set_cell(ws, row, col, None)
 
@@ -354,6 +437,9 @@ def build_sgl_workbook(
         remarks = task.get("remarks")
         if remarks:
             _set_cell(ws, row, remarks_col, str(remarks))
+        work_detail = task.get("work_detail")
+        if work_detail:
+            _set_cell(ws, row, work_detail_col, str(work_detail))
 
         # Every phase column on a populated row is deterministically
         # set to exactly what Preview provided for that phase, or
@@ -362,6 +448,19 @@ def build_sgl_workbook(
         for label, col_idx in phase_columns:
             value = _phase_value(activities, label)
             _set_cell(ws, row, col_idx, value or None)
+
+        # Some "writable" rows (a block's own blank buffer capacity,
+        # e.g. row 6 within a "=SUM(N5:N6)"-style block subtotal) were
+        # never given their own per-row 合計工数/合計金額 formula in the
+        # template -- they only ever counted toward the block's
+        # subtotal by virtue of being blank (contributing 0). Writing a
+        # task's hours into such a row without also adding its own
+        # formula would silently leave that row's own total blank AND
+        # undercount the block subtotal that sums it. Ensure every
+        # POPULATED row has a working per-row formula, adding one only
+        # if it doesn't already have one; a row's pre-existing formula
+        # (e.g. row 20's own "=SUM(H20:M20)") is never overwritten.
+        _ensure_row_totals(ws, row, phase_columns, total_hours_col, total_amount_col)
 
     _populate_summary_title(wb, project_name)
 

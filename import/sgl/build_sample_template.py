@@ -34,6 +34,13 @@ This doesn't affect this app's own import parsing
 columns, which hold literal values, never the SUM/total formula
 cells) -- it only matters for a tool that reads cached values without
 recalculating first.
+
+Also strips ``SOURCE``'s thousands of orphaned Defined Names and
+dozens of External Links (see
+``services/sgl_export_builder.py::_strip_legacy_workbook_bloat`` for
+the full explanation) before saving ``DEST`` -- otherwise this public,
+git-tracked sample file would carry that same bloat forward on every
+regeneration.
 """
 
 import openpyxl
@@ -43,6 +50,11 @@ SOURCE = "simple_resource/sgl_import_export_format.xlsx"
 DEST = "import/sgl/sgl_import_template.xlsx"
 
 wb = openpyxl.load_workbook(SOURCE)
+
+# Strip legacy bloat inherited from SOURCE -- see
+# services/sgl_export_builder.py::_strip_legacy_workbook_bloat.
+wb.defined_names.clear()
+wb._external_links = []
 
 detail = wb["詳細見積_マスタと予実比較"]
 

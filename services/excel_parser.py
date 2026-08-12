@@ -613,13 +613,24 @@ def _build_category_output(cat_slug: str, cat_data: dict[str, Any]) -> dict[str,
     }
 
 
+# The fixed set of keys _add_task_activities-style accumulators always
+# populate on a task_data dict. Anything else a team-specific parser
+# adds (e.g. SGL's own "work_detail") is passed through generically by
+# _build_task_output below, with no per-field/per-team hardcoding here.
+_KNOWN_TASK_DATA_FIELDS = {"task", "buffer_hours", "activities"}
+
+
 def _build_task_output(
     cat_slug: str, category_name: str, task_key: str, task_data: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build one task's full output record, including all its activity details."""
+    """Build one task's full output record, including all its activity
+    details, plus any extra team-specific field already present on
+    ``task_data`` (e.g. SGL's ``work_detail``) passed through as-is.
+    """
     task_name = task_data["task"]
     task_buffer = task_data["buffer_hours"]
     activities = task_data["activities"]
+    extra_fields = {k: v for k, v in task_data.items() if k not in _KNOWN_TASK_DATA_FIELDS}
 
     task_estimate = sum(a["estimate_hours"] for a in activities)
     task_total = task_estimate + task_buffer
@@ -640,6 +651,7 @@ def _build_task_output(
         "text": _task_context_text(
             category_name, task_name, len(activities), task_estimate, task_buffer, task_total,
         ),
+        **extra_fields,
     }
 
 

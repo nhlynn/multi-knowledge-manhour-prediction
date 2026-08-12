@@ -747,6 +747,23 @@ def _build_grouped_categories(
     return list(cat_order.values())
 
 
+_KNOWN_TASK_FIELDS = {
+    "id", "task", "activities", "task_details",
+    "estimate_hours", "buffer_hours", "total_hours", "text",
+}
+
+
+def _extra_task_fields(task: dict[str, Any]) -> dict[str, Any]:
+    """Generically pass through any field already present on a source
+    task record that isn't one of the small set of universally-known
+    fields every team's task shape has -- e.g. SGL's own
+    ``work_detail`` -- with no team- or field-specific hardcoding
+    here. Teams/tasks without such a field are unaffected: a key
+    that's never present is simply never added.
+    """
+    return {k: v for k, v in task.items() if k not in _KNOWN_TASK_FIELDS}
+
+
 def _build_task_row(task_info: dict[str, Any], full_task: dict[str, Any]) -> dict[str, Any]:
     """Build one output task row, showing either all of a task's
     activities ("full" mode) or only the ones actually matched
@@ -783,6 +800,7 @@ def _build_task_row(task_info: dict[str, Any], full_task: dict[str, Any]) -> dic
         "estimate_hours": shown_estimate,
         "buffer_hours": buffer_hours,
         "total_hours": shown_estimate + buffer_hours,
+        **_extra_task_fields(full_task),
     }
 
 
@@ -828,5 +846,6 @@ def _load_full_task(
                         "estimate_hours": task.get("estimate_hours", 0),
                         "buffer_hours": task.get("buffer_hours", 0),
                         "total_hours": task.get("total_hours", 0),
+                        **_extra_task_fields(task),
                     }
     return None

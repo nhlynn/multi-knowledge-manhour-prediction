@@ -49,6 +49,7 @@ _DATA_START_ROW = 4
 _CATEGORY_HEADER = "区分"
 _TASK_HEADER = "項目"
 _PHASE_GROUP_HEADER = "工数（人時間）"
+_WORK_DETAIL_HEADER = "作業詳細"
 
 
 def sgl_excel_to_nested_json(excel_path: str) -> list[dict[str, Any]]:
@@ -107,6 +108,7 @@ def sgl_excel_to_nested_json(excel_path: str) -> list[dict[str, Any]]:
     category_col = header_columns.get(_CATEGORY_HEADER)
     task_col = header_columns.get(_TASK_HEADER)
     phase_group_col = header_columns.get(_PHASE_GROUP_HEADER)
+    work_detail_col = header_columns.get(_WORK_DETAIL_HEADER)
 
     if not (category_col and task_col and phase_group_col):
         logger.warning(
@@ -147,7 +149,12 @@ def sgl_excel_to_nested_json(excel_path: str) -> list[dict[str, Any]]:
         if not row_activities:
             continue
 
-        _add_task_activities(all_categories, current_category, task, row_activities)
+        row_work_detail = ""
+        if work_detail_col:
+            wd_val = ws.cell(row=row, column=work_detail_col).value
+            row_work_detail = str(wd_val).strip() if wd_val is not None else ""
+
+        _add_task_activities(all_categories, current_category, task, row_activities, row_work_detail)
 
     result = _build_nested_output(all_categories)
     _log_conversion_summary(excel_path, result)
@@ -183,10 +190,18 @@ def _add_task_activities(
     category: str,
     task: str,
     row_activities: list[tuple[str, float]],
+    row_work_detail: str = "",
 ) -> None:
-    """Fold one task row's phase activities into ``all_categories``,
-    creating the category/task entries as needed -- same accumulator
-    shape ``services.excel_parser._process_phases_row`` builds.
+    """Fold one task row's phase activities (and 作業詳細 text, if any)
+    into ``all_categories``, creating the category/task entries as
+    needed -- same accumulator shape
+    ``services.excel_parser._process_phases_row`` builds, plus SGL's
+    own ``work_detail`` field.
+
+    A task spanning multiple rows accumulates ``row_work_detail`` from
+    each row it appears on, joined by newline, in row order -- mirrors
+    how a single task's phase-hour activities themselves already
+    accumulate across its rows.
     """
     cat_slug = _slugify(category)
     task_slug = _slugify(task)
@@ -197,7 +212,9 @@ def _add_task_activities(
 
     task_key = f"{cat_slug}_{task_slug}"
     if task_key not in cat_data["tasks"]:
-        cat_data["tasks"][task_key] = {"task": task, "buffer_hours": 0.0, "activities": []}
+        cat_data["tasks"][task_key] = {
+            "task": task, "buffer_hours": 0.0, "activities": [], "work_detail": "",
+        }
     task_data = cat_data["tasks"][task_key]
 
     for label, hours in row_activities:
@@ -207,3 +224,9 @@ def _add_task_activities(
             "task_detail": label,
             "estimate_hours": hours,
         })
+
+    if row_work_detail:
+        task_data["work_detail"] = (
+            f"{task_data['work_detail']}\n{row_work_detail}"
+            if task_data["work_detail"] else row_work_detail
+        )
