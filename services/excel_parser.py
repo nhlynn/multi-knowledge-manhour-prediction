@@ -405,7 +405,22 @@ def _process_phases_sheet(
             "task name") doesn't get silently folded into the last real
             task above it. Rows are only skipped by this check if
             ``id_column`` is configured — omitting it preserves the
-            exact prior behavior.
+            exact prior behavior. Optional ``extra_columns``: a list of
+            ``{"field": ..., "column": ...}`` entries for any other
+            same-sheet column a team's task shape needs verbatim (e.g.
+            KiKan's own ``Status``/``機能ID`` columns) — each resolved
+            column's value is set on the task's ``field`` key, passed
+            through generically all the way to the final JSON/search
+            output by ``_build_task_output``'s own generic-field
+            passthrough (see its ``_KNOWN_TASK_DATA_FIELDS``) — no
+            further plumbing needed here for a team to gain a new
+            simple, same-row, same-sheet field this way. This is NOT
+            for anything requiring cross-row accumulation (like SGL's
+            own multi-row ``work_detail``) or a second worksheet (like
+            KiKan's own ``機能一覧`` cross-reference, still handled by
+            ``services/kikan_import_parser.py``'s own thin
+            enrichment wrapper) — both of those still need dedicated
+            handling beyond this generic mechanism.
         all_categories: Accumulator, mutated in place (same shape
             ``_process_flat_sheet`` builds).
         sheet_name: For log messages only.
@@ -436,6 +451,11 @@ def _process_phases_sheet(
 
     total_col = _find_column(columns, config.get("total_column"))
     id_col = _find_column(columns, config.get("id_column"))
+    extra_columns = [
+        (extra["field"], _find_column(columns, extra["column"]))
+        for extra in config.get("extra_columns", [])
+    ]
+    extra_columns = [(field, col) for field, col in extra_columns if col]
 
     if category_col:
         df[category_col] = df[category_col].ffill()
@@ -444,7 +464,7 @@ def _process_phases_sheet(
     for _, row in df.iterrows():
         _process_phases_row(
             row, task_col, category_col, fixed_category, phase_columns, total_col,
-            config, all_categories, sheet_name, id_col=id_col,
+            config, all_categories, sheet_name, id_col=id_col, extra_columns=extra_columns,
         )
 
 
@@ -481,6 +501,7 @@ def _process_phases_row(
     sheet_name: str,
     *,
     id_col: str | None = None,
+    extra_columns: list[tuple[str, str]] | None = None,
 ) -> None:
     """Fold one phases-mode Excel row into ``all_categories`` — every
     phase column with a nonzero value becomes its own Activity Detail
@@ -547,6 +568,11 @@ def _process_phases_row(
             "task_detail": label,
             "estimate_hours": hours,
         })
+
+    for field, col in extra_columns or []:
+        val = row[col]
+        if pd.notna(val) and str(val).strip():
+            task_data.setdefault(field, str(val).strip())
 
     _warn_if_total_mismatch(row, total_col, row_activities, config, sheet_name, task)
 

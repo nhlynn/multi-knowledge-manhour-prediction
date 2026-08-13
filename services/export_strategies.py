@@ -62,8 +62,7 @@ class DefaultExportStrategy(BaseExportService):
     def build(self, context: ExportContext) -> None:
         build_workbook(
             context.filepath, context.project_name, context.created_by,
-            context.project_remark, context.categories,
-            template_config=context.template_config,
+            context.categories, template_config=context.template_config,
         )
 
 

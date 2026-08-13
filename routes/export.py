@@ -56,7 +56,6 @@ from services.gcs_service import (
     is_local_path,
     list_existing_export_object_paths,
 )
-from services.remark_html import sanitize_remark_html
 from utils.pagination import parse_page_param, total_pages_for
 from utils.permissions import require_login
 
@@ -101,7 +100,7 @@ def _current_team_name() -> str | None:
 
 
 def _select_export_strategy(
-    build_path: str, project_name: str, created_by: str, project_remark: str, categories: list,
+    build_path: str, project_name: str, created_by: str, categories: list,
 ) -> tuple:
     """Select this export's Strategy Pattern object and build its
     ``ExportContext`` (see ``services/base_export_service.py``,
@@ -133,7 +132,7 @@ def _select_export_strategy(
         if bamawl_mapping:
             return BamawlExportBuilder(), ExportContext(
                 filepath=build_path, categories=categories, project_name=project_name,
-                created_by=created_by, project_remark=project_remark,
+                created_by=created_by,
                 column_mapping=bamawl_mapping,
                 template_path=BamawlExportBuilder.template_path(current_app.root_path),
             )
@@ -144,20 +143,20 @@ def _select_export_strategy(
         if kikan_mapping:
             return KikanExportBuilder(), ExportContext(
                 filepath=build_path, categories=categories, project_name=project_name,
-                created_by=created_by, project_remark=project_remark,
+                created_by=created_by,
                 column_mapping=kikan_mapping,
                 template_path=KikanExportBuilder.template_path(current_app.root_path),
             )
     elif strategy_cls is SglExportBuilder:
         return SglExportBuilder(), ExportContext(
             filepath=build_path, categories=categories, project_name=project_name,
-            created_by=created_by, project_remark=project_remark,
+            created_by=created_by,
             template_path=SglExportBuilder.template_path(current_app.root_path),
         )
 
     return DefaultExportStrategy(), ExportContext(
         filepath=build_path, categories=categories, project_name=project_name,
-        created_by=created_by, project_remark=project_remark,
+        created_by=created_by,
         template_config=_team_export_template(),
     )
 
@@ -175,7 +174,6 @@ def export_excel():
     data = request.get_json(silent=True) or {}
     project_name = (data.get("projectName") or "").strip()
     created_by = (data.get("createdBy") or "").strip()
-    project_remark = sanitize_remark_html(data.get("projectRemark") or "")
     categories = data.get("categories", [])
 
     if not project_name:
@@ -192,7 +190,7 @@ def export_excel():
     os.makedirs(temp_dir, exist_ok=True)
     build_path = os.path.join(temp_dir, build_export_filename(safe_name))
 
-    strategy, context = _select_export_strategy(build_path, project_name, created_by, project_remark, categories)
+    strategy, context = _select_export_strategy(build_path, project_name, created_by, categories)
 
     try:
         strategy.build(context)
@@ -539,4 +537,3 @@ def export_file_raw(filename: str):
         as_attachment=False,
         download_name=filename,
     )
-

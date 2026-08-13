@@ -12,32 +12,22 @@ deliberately no separate import-only or export-only template file.
 
 Design:
 
-- Only ``工数詳細`` is ever populated -- no other worksheet in the
-  workbook is written to. ``機能一覧``, ``Milestone``, and ``工数・費用``
-  ship exactly as the template has them.
-- The Preview page's ``categories`` payload (Category → Task →
-  Activity) is the single source of truth for everything written: only
-  the functions the user actually selected are written, one per row,
-  using exactly the values/man-hours/remarks as edited in Preview --
-  nothing here re-derives or recomputes a number Preview already
-  determined.
-- Because ``機能名称`` is off-limits to touch indirectly via
-  ``機能一覧`` (the sheet this module no longer populates), each
-  selected function's name is written as a literal value directly into
-  ``工数詳細``'s own ``機能名称`` cell, replacing that row's original
-  ``=VLOOKUP(...)`` formula. Only the *value* changes; the cell's
-  existing formatting (font, borders, number format) is untouched, and
-  this happens only for rows a selected function is actually written
-  into -- unused rows within the block are cleared, not touched.
+- ``工数詳細`` (Preview's Category -> Task -> Activity data, one
+  selected function per row, using exactly the values/man-hours/
+  remarks as edited in Preview -- nothing here re-derives or
+  recomputes a number Preview already determined) and ``機能一覧`` are
+  BOTH populated, kept in lockstep -- see the "機能一覧 sync" note
+  below for why. ``Milestone`` and ``工数・費用`` ship exactly as the
+  template has them.
 - Every phase column (``実装工数``, ``コードレビュー``, ``仕様理解``, ...)
-  on a populated row is written deterministically from that task's
-  activities: a literal value for a phase Preview actually provided, or
-  blank for one it didn't -- never left as the template's own row-2
-  ratio formula, which would otherwise silently derive a number from
-  ``実装工数`` that the user never edited or approved. This mirrors how
-  the row's own hours were actually arrived at (a person's edited
-  estimate per phase), rather than mechanically reconstructing a
-  breakdown from a single base number. The row's own ``合計(h)`` cell
+  on a populated ``工数詳細`` row is written deterministically from
+  that task's activities: a literal value for a phase Preview actually
+  provided, or blank for one it didn't -- never left as the template's
+  own row-2 ratio formula, which would otherwise silently derive a
+  number from ``実装工数`` that the user never edited or approved. This
+  mirrors how the row's own hours were actually arrived at (a person's
+  edited estimate per phase), rather than mechanically reconstructing
+  a breakdown from a single base number. The row's own ``合計(h)`` cell
   is left as its original ``=SUM(...)`` formula, which still correctly
   totals whatever literals (and blanks) are written into the phase
   cells above it once Excel opens the file.
@@ -48,35 +38,73 @@ Design:
   unselected row (``0 * ratio = 0``) without touching those cells
   directly.
 - ``業務分類`` (category) is merged across the whole function-row block
-  (``A5:A11``) in the template -- only the merge's top-left cell is
-  ever written (openpyxl requires this; the rest of a merged range
-  must stay empty), so the merge itself is never touched/resized. If
-  the selected functions span more than one category, that single cell
-  can't represent all of them -- the first one is used and a warning is
-  logged (same "known limitation, documented rather than silently
-  guessed around" approach ``bamawl_export_builder.py`` takes for its
-  own edge cases).
+  in both worksheets (e.g. ``工数詳細``'s ``A5:A11``, ``機能一覧``'s
+  ``A2:A8``) in the template -- only the merge's top-left cell is ever
+  written (openpyxl requires this; the rest of a merged range must
+  stay empty), so the merge itself is never touched/resized in either
+  sheet. If the selected functions span more than one category, that
+  single cell can't represent all of them -- the first one is used and
+  a warning is logged (same "known limitation, documented rather than
+  silently guessed around" approach ``bamawl_export_builder.py`` takes
+  for its own edge cases).
+- **機能一覧 sync**: the pristine template links the two worksheets --
+  ``工数詳細``'s ``機能名称`` cell is originally a live
+  ``=VLOOKUP(<this row's 機能ID>, 機能一覧!$D$2:$F$8, 2, FALSE)``
+  formula, joining ``工数詳細``'s own function-ID column against
+  ``機能一覧``'s ScreenID column to pull the function's real name from
+  there. If only ``工数詳細`` were ever populated (leaving ``機能一覧``
+  showing the template's own sample placeholder rows), that VLOOKUP
+  would silently resolve to stale sample data -- or the two sheets
+  would simply show two different, disconnected sets of functions with
+  no relationship between them at all (a very confusing result for
+  anyone reading ``機能一覧`` expecting it to describe what ``工数詳細``
+  is estimating). So both sheets are written from the SAME
+  ``tasks_with_category`` list, in the same row order, sharing one
+  generated function-ID per row (``F001``, ``F002``, ...) written into
+  both ``工数詳細``'s function-ID column and ``機能一覧``'s ScreenID
+  column -- the exact join key the original VLOOKUP relationship used.
+  ``工数詳細``'s ``機能名称`` cell itself is still written as a literal
+  value (not restored as a live VLOOKUP formula) -- guaranteed correct
+  regardless of any join-key mismatch, rather than depending on a
+  formula recalculating correctly, while ``機能一覧`` having the
+  matching real name at that same key means the *relationship* the
+  template intends is still meaningfully true, just resolved once at
+  export time instead of live in Excel.
+  ``機能一覧``'s own ``機能ID`` and ``内容`` columns have no matching
+  field in Preview's task data and are left blank, same reasoning
+  ``Status`` is left blank in ``工数詳細`` below.
 - A task's user-edited remarks have nowhere to go as a literal cell
   value -- ``工数詳細`` has no remarks/notes column of its own, and
   adding one would change the sheet's layout. Instead, remarks are
   attached as an Excel cell comment on the row's ``機能名称`` cell --
   carries the text without adding a visible column or altering the
   sheet's layout at all.
-- ``Status`` (a dropdown-validated 大/中/小 field) has no matching
-  field in Preview's data and is left blank, the same reasoning
-  Bamawl's export blanks its ``ReqDefinition`` free-text sections.
+- ``Status`` (a dropdown-validated 大/中/小 field) is written from a
+  task's own ``status`` field when present -- captured at import time
+  from ``工数詳細``'s own ``Status`` column (see
+  ``utils/migrations/kikan_import_export_config.py``'s
+  ``extra_columns``) and carried through Preview/search generically,
+  the same mechanism SGL's own ``work_detail``/``block`` fields use.
+  Left blank only for a task with no such value (e.g. a brand-new
+  function added directly in Preview, never imported from a
+  workbook) -- same reasoning Bamawl's export blanks its
+  ``ReqDefinition`` free-text sections.
 - Unselected functions are never written: every row in the template's
-  original function-row block that isn't used by a selected function is
-  cleared, not left with stale sample data.
+  original function-row block (in EITHER worksheet) that isn't used by
+  a selected function is cleared, not left with stale sample data.
 
 **Known limitation** (a direct consequence of reusing this specific
 template file rather than building a fresh one, same category of
 limitation as Bamawl's own documented one): ``工数詳細``'s rollup rows
 (person-hour/day/month sums, per-role breakdowns) are calibrated to the
-template's own built-in 7-row function block. This module writes into
-that existing block only (never shifting/extending it) and raises
-``KikanExportError`` rather than overflow into the rollup rows if a
-project has more selected functions than the block holds.
+template's own built-in 7-row function block, and ``機能一覧``'s own
+block is expected to hold exactly as many rows. This module writes into
+those existing blocks only (never shifting/extending either one), and
+raises ``KikanExportError`` rather than overflow into ``工数詳細``'s
+rollup rows if a project has more selected functions than the block
+holds, or if ``機能一覧``'s own block turns out to have a different
+number of rows than ``工数詳細``'s (the two must match for the
+row-for-row sync above to make sense).
 """
 
 import logging
@@ -92,6 +120,8 @@ from services.excel_parser import _find_column, _normalize_header, _safe_float
 logger = logging.getLogger(__name__)
 
 _COMMENT_AUTHOR = "MHES"
+_FUNCTION_LIST_SHEET = "機能一覧"
+_FUNCTION_LIST_HEADER_ROW = 1
 
 
 class KikanExportError(ValueError):
@@ -155,6 +185,17 @@ def _phase_value(activities: list[dict[str, Any]], label: str) -> float:
     return 0.0
 
 
+def _merged_block_row_span(ws, anchor_row: int, anchor_col: int) -> int | None:
+    """Return the row span of the merged range anchored at
+    ``(anchor_row, anchor_col)`` (e.g. ``機能一覧``'s ``A2:A8`` ->
+    ``7``), or None if that cell isn't the top-left of any merge.
+    """
+    for merged_range in ws.merged_cells.ranges:
+        if merged_range.min_row == anchor_row and merged_range.min_col == anchor_col:
+            return merged_range.max_row - merged_range.min_row + 1
+    return None
+
+
 def _clear_block(ws, data_start_row: int, capacity: int, columns: list[int]) -> None:
     """Blank every cell in ``columns`` across the template's whole
     function-row block, before writing the selected functions into it
@@ -175,9 +216,11 @@ def build_kikan_workbook(
     column_mapping: dict[str, Any],
     template_path: str,
 ) -> None:
-    """Populate KiKan Team's own Excel template's ``工数詳細`` worksheet
-    with Preview's data and save the result to ``filepath``. No other
-    worksheet in the workbook is touched.
+    """Populate KiKan Team's own Excel template's ``工数詳細`` AND
+    ``機能一覧`` worksheets with Preview's data (kept in sync with each
+    other -- see module docstring's "機能一覧 sync" note) and save the
+    result to ``filepath``. Neither ``Milestone`` nor ``工数・費用`` is
+    touched.
 
     Args:
         filepath: Where to save the populated workbook.
@@ -265,6 +308,42 @@ def build_kikan_workbook(
             f"or update the template."
         )
 
+    # 機能一覧 sync (see module docstring's "機能一覧 sync" note) -- both
+    # sheets are populated together from the same tasks_with_category
+    # list, so the pristine template's 工数詳細 <-> 機能一覧 relationship
+    # (originally a live VLOOKUP) stays meaningfully true after export
+    # instead of leaving 機能一覧 orphaned on stale sample data.
+    if _FUNCTION_LIST_SHEET not in wb.sheetnames:
+        raise KikanExportError(
+            f"KiKan Team's export template is missing the required "
+            f"'{_FUNCTION_LIST_SHEET}' worksheet."
+        )
+    func_list_ws = wb[_FUNCTION_LIST_SHEET]
+    func_list_cols = _resolve_template_columns(func_list_ws, _FUNCTION_LIST_HEADER_ROW)
+    func_list_data_start_row = _FUNCTION_LIST_HEADER_ROW + 1
+    func_list_category_col = _column_index(func_list_cols, "業務分類")
+    func_list_no_col = _column_index(func_list_cols, "番号")
+    func_list_id_col = _column_index(func_list_cols, "機能ID")
+    func_list_screen_id_col = _column_index(func_list_cols, "ScreenID")
+    func_list_name_col = _column_index(func_list_cols, "機能名称")
+    func_list_content_col = _column_index(func_list_cols, "内容")
+    if func_list_name_col is None or func_list_screen_id_col is None:
+        raise KikanExportError(
+            f"KiKan Team's export template's '{_FUNCTION_LIST_SHEET}' worksheet is missing "
+            f"its 機能名称/ScreenID columns; cannot keep it in sync with '{sheet_name}'."
+        )
+
+    func_list_capacity = _merged_block_row_span(
+        func_list_ws, func_list_data_start_row, func_list_category_col,
+    ) if func_list_category_col else None
+    if func_list_capacity is not None and func_list_capacity != capacity:
+        raise KikanExportError(
+            f"KiKan Team's export template's '{_FUNCTION_LIST_SHEET}' worksheet has room for "
+            f"{func_list_capacity} function row(s), but '{sheet_name}' has room for "
+            f"{capacity} -- the two must match for exported functions to stay in sync "
+            f"across both worksheets. Update the template so both blocks are the same size."
+        )
+
     # Clear the template's whole function-row block first -- 機能名称
     # (whose original VLOOKUP formula is replaced with a literal name
     # only for rows a selected function is actually written into),
@@ -287,6 +366,17 @@ def build_kikan_workbook(
     if category_col:
         ws.cell(row=data_start_row, column=category_col).value = None
 
+    # Same clearing for 機能一覧's own block, keyed by its own column
+    # set (機能一覧 has no phase/hours columns, so nothing there ever
+    # needs the "blank one ratio-formula base column" treatment).
+    _clear_block(
+        func_list_ws, func_list_data_start_row, capacity,
+        [func_list_no_col, func_list_id_col, func_list_screen_id_col,
+         func_list_name_col, func_list_content_col],
+    )
+    if func_list_category_col:
+        func_list_ws.cell(row=func_list_data_start_row, column=func_list_category_col).value = None
+
     categories_used = {cat for cat, _task in tasks_with_category if cat}
     if len(categories_used) > 1:
         logger.warning(
@@ -298,28 +388,66 @@ def build_kikan_workbook(
     block_category = next((cat for cat, _task in tasks_with_category if cat), None)
     if category_col and block_category:
         ws.cell(row=data_start_row, column=category_col, value=block_category)
+    if func_list_category_col and block_category:
+        func_list_ws.cell(row=func_list_data_start_row, column=func_list_category_col, value=block_category)
 
     unmatched_labels: set[str] = set()
     configured_labels = {_normalize_header(label) for label, _idx in phase_cols}
 
     for i, (_category, task) in enumerate(tasks_with_category, start=1):
         row = data_start_row + i - 1
+        func_list_row = func_list_data_start_row + i - 1
         activities = task.get("activities", []) or []
+        task_name = task.get("task", "")
 
         for act in activities:
             norm = _normalize_header(act.get("task_detail") or "")
             if norm and norm not in configured_labels:
                 unmatched_labels.add(act.get("task_detail"))
 
+        # Shared join key written into BOTH 工数詳細's function-ID
+        # column and 機能一覧's ScreenID column -- see the module
+        # docstring's "機能一覧 sync" note for why: this is the exact
+        # key the pristine template's own VLOOKUP joined the two
+        # sheets on. A task that came from an actual KiKan import
+        # already carries its OWN real ``screen_id`` (see
+        # services/kikan_import_parser.py) -- reused as-is so a
+        # round-tripped function keeps the same identity across
+        # import -> Preview -> export. Only a task with no such value
+        # (e.g. a brand-new function added directly in Preview, never
+        # imported from a workbook) falls back to a freshly generated
+        # placeholder.
+        shared_func_id = task.get("screen_id") or f"F{i:03d}"
+
         if no_col:
             ws.cell(row=row, column=no_col, value=i)
         if func_id_col:
-            ws.cell(row=row, column=func_id_col, value=f"F{i:03d}")
+            ws.cell(row=row, column=func_id_col, value=shared_func_id)
+        if status_col:
+            status = task.get("status")
+            if status:
+                ws.cell(row=row, column=status_col, value=status)
 
-        name_cell = ws.cell(row=row, column=name_col, value=task.get("task", ""))
+        name_cell = ws.cell(row=row, column=name_col, value=task_name)
         remarks = task.get("remarks")
         if remarks:
             name_cell.comment = Comment(str(remarks), _COMMENT_AUTHOR)
+
+        if func_list_no_col:
+            func_list_ws.cell(row=func_list_row, column=func_list_no_col, value=i)
+        func_list_ws.cell(row=func_list_row, column=func_list_screen_id_col, value=shared_func_id)
+        func_list_ws.cell(row=func_list_row, column=func_list_name_col, value=task_name)
+        # 機能一覧's OWN 機能ID/内容 -- different columns from anything
+        # on 工数詳細, only ever available for a task that came from an
+        # actual KiKan import (see services/kikan_import_parser.py);
+        # left blank for a brand-new Preview-only task, same reasoning
+        # Status is left blank below when absent.
+        function_id = task.get("function_id")
+        if func_list_id_col and function_id:
+            func_list_ws.cell(row=func_list_row, column=func_list_id_col, value=function_id)
+        content = task.get("content")
+        if func_list_content_col and content:
+            func_list_ws.cell(row=func_list_row, column=func_list_content_col, value=content)
 
         # Every phase column on a populated row is deterministically
         # set to exactly what Preview provided -- its literal
@@ -348,8 +476,8 @@ def build_kikan_workbook(
     wb.save(filepath)
     logger.info(
         "Built KiKan Team export workbook: %s (%d selected function(s) written into '%s' "
-        "only).",
-        filepath, len(tasks_with_category), sheet_name,
+        "and kept in sync with '%s').",
+        filepath, len(tasks_with_category), sheet_name, _FUNCTION_LIST_SHEET,
     )
 
 

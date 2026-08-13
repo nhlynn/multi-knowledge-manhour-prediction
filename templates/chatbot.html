@@ -377,6 +377,18 @@
         saveChatHistory();
     }
 
+    // Display-only rounding to at most 2 decimal places (e.g.
+    // 7.966999999999998 -> "7.97", 7 -> "7") -- floating-point addition
+    // of many small hour values easily produces long, unreadable
+    // decimal tails; this never touches the underlying stored number,
+    // only what's shown, so full precision is still used for every
+    // calculation.
+    function fmt2(n) {
+        n = Number(n);
+        if (!isFinite(n)) return '0';
+        return (Math.round(n * 100) / 100).toString();
+    }
+
     // Sums the same task/activity fields the same way everywhere a
     // "total" is shown or carried into Preview — used both for the
     // already-correct Preview/"Go to Preview" total (selection-scoped)
@@ -415,18 +427,18 @@
         var summaryFinal = document.getElementById('summaryFinal-' + resultId);
         var summaryEstimate = document.getElementById('summaryEstimate-' + resultId);
         var summaryBuffer = document.getElementById('summaryBuffer-' + resultId);
-        if (summaryFinal) summaryFinal.textContent = totals.final;
-        if (summaryEstimate) summaryEstimate.textContent = totals.estimate;
-        if (summaryBuffer) summaryBuffer.textContent = totals.buffer;
+        if (summaryFinal) summaryFinal.textContent = fmt2(totals.final);
+        if (summaryEstimate) summaryEstimate.textContent = fmt2(totals.estimate);
+        if (summaryBuffer) summaryBuffer.textContent = fmt2(totals.buffer);
 
         var footTaskEstimate = document.getElementById('footTaskEstimate-' + resultId);
         var footEstimate = document.getElementById('footEstimate-' + resultId);
         var footBuffer = document.getElementById('footBuffer-' + resultId);
         var footFinal = document.getElementById('footFinal-' + resultId);
-        if (footTaskEstimate) footTaskEstimate.textContent = totals.task_estimate;
-        if (footEstimate) footEstimate.textContent = totals.estimate;
-        if (footBuffer) footBuffer.textContent = totals.buffer;
-        if (footFinal) footFinal.textContent = totals.final;
+        if (footTaskEstimate) footTaskEstimate.textContent = fmt2(totals.task_estimate);
+        if (footEstimate) footEstimate.textContent = fmt2(totals.estimate);
+        if (footBuffer) footBuffer.textContent = fmt2(totals.buffer);
+        if (footFinal) footFinal.textContent = fmt2(totals.final);
     }
 
     function buildResponseHtml(query, categories, totals) {
@@ -497,12 +509,12 @@
                     }
 
                     table += '<td>' + escHtml(act.task_detail) + '</td>';
-                    table += '<td class="text-end">' + act.estimate_hours + '</td>';
+                    table += '<td class="text-end">' + fmt2(act.estimate_hours) + '</td>';
 
                     if (firstTaskRow) {
-                        table += '<td class="text-end align-middle" rowspan="' + actLen + '">' + task.estimate_hours + '</td>';
-                        table += '<td class="text-end align-middle" rowspan="' + actLen + '">' + task.buffer_hours + '</td>';
-                        table += '<td class="text-end align-middle fw-bold" rowspan="' + actLen + '">' + task.total_hours + '</td>';
+                        table += '<td class="text-end align-middle" rowspan="' + actLen + '">' + fmt2(task.estimate_hours) + '</td>';
+                        table += '<td class="text-end align-middle" rowspan="' + actLen + '">' + fmt2(task.buffer_hours) + '</td>';
+                        table += '<td class="text-end align-middle fw-bold" rowspan="' + actLen + '">' + fmt2(task.total_hours) + '</td>';
                         firstTaskRow = false;
                     }
 
@@ -797,8 +809,7 @@
                     categories: previewData.categories,
                     totals: previewData.totals || {},
                     projectName: previewData.projectName || '',
-                    createdBy: previewData.createdBy || '',
-                    projectRemark: previewData.projectRemark || ''
+                    createdBy: previewData.createdBy || ''
                 })
             })
             .then(function() { sessionStorage.removeItem('previewData'); })

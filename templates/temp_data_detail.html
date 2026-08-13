@@ -314,13 +314,11 @@
         var existing = [];
         var mergedProjectName = '';
         var mergedCreatedBy = '';
-        var mergedProjectRemark = '';
         try {
             var prev = JSON.parse(existingRaw || '{}');
             existing = prev.categories || [];
             mergedProjectName = prev.projectName || '';
             mergedCreatedBy = prev.createdBy || '';
-            mergedProjectRemark = prev.projectRemark || '';
         } catch (e) {}
 
         var existingMap = {};
@@ -352,8 +350,7 @@
             categories: existing,
             totals: totals,
             projectName: mergedProjectName || stash.projectName || '',
-            createdBy: mergedCreatedBy || stash.createdBy || '',
-            projectRemark: mergedProjectRemark || stash.projectRemark || ''
+            createdBy: mergedCreatedBy || stash.createdBy || ''
         }));
 
         deleteStashOnServer(STASH_ID).finally(function() {

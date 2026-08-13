@@ -96,6 +96,18 @@ KIKAN_IMPORT_COLUMN_MAPPING: dict[str, Any] = {
     "task_column": "機能名称",
     "id_column": "番号",
     "category_column": "業務分類",
+    "extra_columns": [
+        {"field": "status", "column": "Status"},
+        # 工数詳細's own "機能ID" column actually holds a ScreenID-style
+        # join-key value (see services/kikan_export_builder.py's own
+        # "機能一覧 sync" note) -- captured here as "screen_id" (not
+        # "function_id") to name it by what it actually IS, not its
+        # confusing column header. services/kikan_import_parser.py
+        # uses this exact field to look up 機能一覧's own matching row
+        # and pull in that sheet's OWN, differently-valued 機能ID and
+        # 内容 columns.
+        {"field": "screen_id", "column": "機能ID"},
+    ],
     "phase_columns": [
         {"label": "Development", "column": "実装工数 (h)"},
         {"label": "Code Review", "column": "コードレビュー (h)"},

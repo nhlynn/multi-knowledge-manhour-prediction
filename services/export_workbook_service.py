@@ -14,8 +14,6 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from services.remark_html import build_single_cell_data, remark_html_to_lines
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_EXPORT_TEMPLATE = {
@@ -48,11 +46,10 @@ def _style_row(ws, row: int, num_cols: int, *, border=None, fill=None, font=None
     """Apply the given border/fill/font (whichever aren't None) to every
     cell in ``row`` across ``num_cols`` columns.
 
-    Replaces what were three separate, near-identical
+    Replaces what would otherwise be several separate, near-identical
     ``for col_idx in range(1, num_cols + 1): ws.cell(...)...`` loops
-    (total row, remark header row, remark content row) with one helper —
-    same cells styled with the same objects in the same order, just not
-    duplicated per call site.
+    (e.g. the total row) with one helper — same cells styled with the
+    same objects in the same order, just not duplicated per call site.
     """
     for col_idx in range(1, num_cols + 1):
         cell = ws.cell(row=row, column=col_idx)
@@ -68,7 +65,6 @@ def build_workbook(
     filepath: str,
     project_name: str,
     created_by: str,
-    project_remark: str,
     categories: list,
     template_config: dict | None = None,
 ) -> None:
@@ -82,10 +78,9 @@ def build_workbook(
             pre-Phase-8 layout.
 
     The title/Created-By/Date metadata rows, per-category row merging,
-    totals row, and the rich-text Remark section are shared structure —
-    identical for every team regardless of template; only the data
-    table's columns (which ones appear, their order, label, and width)
-    are configurable.
+    and totals row are shared structure — identical for every team
+    regardless of template; only the data table's columns (which ones
+    appear, their order, label, and width) are configurable.
     """
     template_config = template_config or DEFAULT_EXPORT_TEMPLATE
     columns = template_config.get("columns") or DEFAULT_EXPORT_TEMPLATE["columns"]
@@ -225,54 +220,5 @@ def build_workbook(
             row=total_row, column=working_day_col,
             value=f"={get_column_letter(estimate_col)}{total_row}/8",
         ).alignment = center_align
-
-    # --- Remark section ---
-    # The whole remark lives in ONE merged cell/row (auto-sized height)
-    # rather than one row per line. Bold/italic/underline/font color and
-    # bullet/numbered-list markers are preserved exactly, per character.
-    # A single cell can only carry one fill color and one hyperlink for
-    # its entire content though, so if the remark uses more than one
-    # highlight color or more than one link, only the first of each
-    # applies to the whole cell (see services/remark_html.py for why).
-    # This section is shared structure, identical for every team's
-    # template — only the merge span (num_cols) varies.
-    remark_header_row = total_row + 2
-    ws.merge_cells(
-        start_row=remark_header_row, start_column=1,
-        end_row=remark_header_row, end_column=num_cols,
-    )
-    remark_header_cell = ws.cell(row=remark_header_row, column=1, value="Remark:")
-    remark_header_cell.font = cat_font
-    # A border set only on the merged range's top-left cell only draws
-    # that one cell's edges — Excel needs every underlying cell in the
-    # merge to carry the border, or the other sides (right/bottom here)
-    # are left open. Same reasoning applies to the remark content row below.
-    _style_row(ws, remark_header_row, num_cols, border=thin_border)
-
-    remark_row = remark_header_row + 1
-    remark_lines = remark_html_to_lines(project_remark)
-    cell_data = build_single_cell_data(remark_lines)
-
-    line_count = max(len(remark_lines), 1)
-    row_height = min(409, max(20, line_count * 15 + 5))
-    ws.merge_cells(start_row=remark_row, start_column=1, end_row=remark_row, end_column=num_cols)
-    ws.row_dimensions[remark_row].height = row_height
-
-    _style_row(ws, remark_row, num_cols, border=thin_border)
-
-    remark_cell = ws.cell(row=remark_row, column=1)
-    remark_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-
-    if cell_data is None:
-        remark_cell.value = "No remark added."
-        remark_cell.font = Font(italic=True, color="94A3B8")
-    else:
-        remark_cell.value = cell_data["value"]
-        if cell_data["fill"]:
-            remark_cell.fill = PatternFill(
-                start_color=cell_data["fill"], end_color=cell_data["fill"], fill_type="solid"
-            )
-        if cell_data["hyperlink"]:
-            remark_cell.hyperlink = cell_data["hyperlink"]
 
     wb.save(filepath)

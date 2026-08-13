@@ -2,7 +2,6 @@
 {% block title %}Preview{% endblock %}
 
 {% block extra_css %}
-<link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
 <style>
     /* ── Editable spans ── */
     .editable {
@@ -173,16 +172,6 @@
     .collapse-toggle .bi { transition: transform 240ms cubic-bezier(.4,0,.2,1); display: block; font-size: 0.85rem; }
     .collapse-toggle[aria-expanded="false"] .bi { transform: rotate(-180deg); }
 
-    /* ── Task remarks ── */
-    .task-remarks-row {
-        background: #fbfbfb; border-top: 1px dashed #ececec;
-        font-size: 0.78rem; color: #475569;
-    }
-    .task-remarks-row .editable:empty::before {
-        content: attr(data-placeholder);
-        color: #b0b8c1; font-style: italic;
-    }
-
     /* ── Activities ── */
     .activities-list { background: #fafbfc; border-top: 1px solid #f0f4f8; }
     .act-hours-col { width: 5.5rem; flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
@@ -228,63 +217,6 @@
     }
     .total-item-final .total-item-label { color: #818cf8; font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; font-weight: 700; }
     .total-item-final .total-item-val { font-size: 1.5rem; color: #c7d2fe; font-weight: 700; }
-
-    /* ── Remark editor ── */
-    #projectRemarkEditorWrap .ql-toolbar.ql-snow {
-        border: 1px solid #e2e8f0;
-        border-bottom: none;
-        border-radius: 10px 10px 0 0;
-        background: #f8fafc;
-        padding: 8px 10px;
-    }
-    #projectRemarkEditorWrap .ql-container.ql-snow {
-        border: 1px solid #e2e8f0;
-        border-radius: 0 0 10px 10px;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        font-size: 0.875rem;
-        background: #fff;
-        resize: vertical;
-        overflow-y: auto;
-        min-height: 220px;
-    }
-    #projectRemarkEditorWrap .ql-editor {
-        min-height: 220px;
-        line-height: 1.55;
-        color: #1e293b;
-    }
-    #projectRemarkEditorWrap .ql-editor.ql-blank::before {
-        color: #94a3b8;
-        font-style: normal;
-        left: 15px; right: 15px;
-    }
-    #projectRemarkEditorWrap:focus-within .ql-toolbar.ql-snow,
-    #projectRemarkEditorWrap:focus-within .ql-container.ql-snow {
-        border-color: #6366f1;
-    }
-    #projectRemarkEditorWrap:focus-within .ql-container.ql-snow {
-        box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
-    }
-    #projectRemarkToolbar.ql-toolbar.ql-snow .ql-formats { margin-right: 12px; }
-    #projectRemarkToolbar .ql-stroke { stroke: #64748b; }
-    #projectRemarkToolbar .ql-fill { fill: #64748b; }
-    #projectRemarkToolbar button:hover .ql-stroke,
-    #projectRemarkToolbar button.ql-active .ql-stroke,
-    #projectRemarkToolbar .ql-picker-label:hover .ql-stroke,
-    #projectRemarkToolbar .ql-picker.ql-expanded .ql-picker-label .ql-stroke { stroke: #6366f1; }
-    #projectRemarkToolbar button:hover .ql-fill,
-    #projectRemarkToolbar button.ql-active .ql-fill,
-    #projectRemarkToolbar .ql-picker-label:hover .ql-fill { fill: #6366f1; }
-    #projectRemarkToolbar button:hover,
-    #projectRemarkToolbar button.ql-active { color: #6366f1; }
-    #projectRemarkToolbar button {
-        width: 26px; height: 26px; border-radius: 5px;
-    }
-    #projectRemarkToolbar button:hover { background: #eef2ff; }
-    #projectRemarkEditorWrap.locked .ql-toolbar.ql-snow { display: none; }
-    #projectRemarkEditorWrap.locked .ql-container.ql-snow {
-        border-radius: 10px; background: #f8fafc; resize: none;
-    }
-    #projectRemarkEditorWrap.locked .ql-editor { cursor: default; }
 
     /* ── Empty state ── */
     .empty-icon {
@@ -340,52 +272,6 @@
     </div>
 </div>
 
-<div class="row mb-4">
-    <div class="col">
-        <div class="card preview-section-card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Remark</h5>
-                <small class="text-muted" style="font-size:0.72rem;" id="projectRemarkLockedBadge" hidden>
-                    <i class="bi bi-lock-fill me-1"></i>Read-only
-                </small>
-            </div>
-            <div class="card-body">
-                <div id="projectRemarkEditorWrap">
-                    <div id="projectRemarkToolbar">
-                        <span class="ql-formats">
-                            <button class="ql-bold" title="Bold"></button>
-                            <button class="ql-italic" title="Italic"></button>
-                            <button class="ql-underline" title="Underline"></button>
-                        </span>
-                        <span class="ql-formats">
-                            <select class="ql-color" title="Font Color">
-                                <option value="#000000"></option><option value="#e60000"></option><option value="#ff9900"></option><option value="#ffff00"></option><option value="#008a00"></option><option value="#0066cc"></option><option value="#9933ff"></option>
-                                <option value="#ffffff"></option><option value="#facccc"></option><option value="#ffebcc"></option><option value="#ffffcc"></option><option value="#cce8cc"></option><option value="#cce0f5"></option><option value="#ebd6ff"></option>
-                                <option value="#bbbbbb"></option><option value="#f06666"></option><option value="#ffc266"></option><option value="#ffff66"></option><option value="#66b966"></option><option value="#66a3e0"></option><option value="#c285ff"></option>
-                                <option value="#888888"></option><option value="#a10000"></option><option value="#b26b00"></option><option value="#b2b200"></option><option value="#006100"></option><option value="#0047b2"></option><option value="#6b24b2"></option>
-                                <option value="#444444"></option><option value="#5c0000"></option><option value="#663d00"></option><option value="#666600"></option><option value="#003700"></option><option value="#002966"></option><option value="#3d1466"></option>
-                                <option selected></option>
-                            </select>
-                        </span>
-                        <span class="ql-formats">
-                            <button class="ql-list" value="bullet" title="Bullet List"></button>
-                            <button class="ql-list" value="ordered" title="Numbered List"></button>
-                        </span>
-                        <span class="ql-formats">
-                            <button class="ql-undo" title="Undo"><i class="bi bi-arrow-counterclockwise"></i></button>
-                            <button class="ql-redo" title="Redo"><i class="bi bi-arrow-clockwise"></i></button>
-                        </span>
-                    </div>
-                    <div id="projectRemarkEditor"></div>
-                </div>
-                <p id="projectRemarkEmpty" class="text-muted mb-0 mt-2" style="font-size:0.85rem; display:none;">
-                    <i class="bi bi-journal-x me-1"></i>No remark added.
-                </p>
-            </div>
-        </div>
-    </div>
-</div>
-
 <div class="row">
     <div class="col">
         <div class="card preview-section-card">
@@ -432,7 +318,6 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
 <script>
 (function() {
     var raw = sessionStorage.getItem('previewData');
@@ -454,98 +339,6 @@
     createdByInput.addEventListener('input', function() {
         data.createdBy = createdByInput.value;
         sessionStorage.setItem('previewData', JSON.stringify(data));
-    });
-
-    // --- Remark (rich text editor) ---
-    // Whitelist-based sanitizer: defense-in-depth against pasted/hand-crafted
-    // HTML containing scripts or event-handler attributes. Quill's own
-    // clipboard matchers already strip most of this on paste, but content
-    // set programmatically (e.g. restored from a stash) isn't guaranteed
-    // to have gone through them.
-    var REMARK_ALLOWED_TAGS = { P:1, BR:1, B:1, STRONG:1, I:1, EM:1, U:1, S:1, UL:1, OL:1, LI:1, A:1, SPAN:1, DIV:1, BLOCKQUOTE:1 };
-    var REMARK_DANGEROUS_TAGS = { SCRIPT:1, STYLE:1, IFRAME:1, OBJECT:1, EMBED:1, SVG:1, FORM:1, INPUT:1, BUTTON:1 };
-    function sanitizeRemarkHtml(html) {
-        var tmp = document.createElement('div');
-        tmp.innerHTML = html || '';
-        (function clean(node) {
-            var children = Array.prototype.slice.call(node.childNodes);
-            children.forEach(function(child) {
-                if (child.nodeType === 1) {
-                    if (REMARK_DANGEROUS_TAGS[child.tagName]) {
-                        // Drop the tag AND its content entirely (never executed
-                        // since it's parsed via innerHTML into a detached div,
-                        // but strip it so it can't leak into saved/exported output).
-                        node.removeChild(child);
-                        return;
-                    }
-                    if (!REMARK_ALLOWED_TAGS[child.tagName]) {
-                        // Unwrap: keep its text/children, drop the tag itself.
-                        while (child.firstChild) node.insertBefore(child.firstChild, child);
-                        node.removeChild(child);
-                        return;
-                    }
-                    Array.prototype.slice.call(child.attributes).forEach(function(attr) {
-                        var name = attr.name.toLowerCase();
-                        var keep = false;
-                        if (child.tagName === 'A' && name === 'href' && /^(https?:|mailto:)/i.test(attr.value)) keep = true;
-                        if (child.tagName === 'SPAN' && name === 'style') keep = true;
-                        // Quill wraps both bullet and numbered lists in <ol>,
-                        // distinguishing them only via this attribute on each
-                        // <li> — stripping it makes every list look numbered.
-                        if (child.tagName === 'LI' && name === 'data-list') keep = true;
-                        if (!keep) child.removeAttribute(attr.name);
-                    });
-                    if (child.tagName === 'A') {
-                        child.setAttribute('target', '_blank');
-                        child.setAttribute('rel', 'noopener noreferrer');
-                    }
-                    clean(child);
-                } else if (child.nodeType !== 3) {
-                    node.removeChild(child); // strip comments etc.
-                }
-            });
-        })(tmp);
-        return tmp.innerHTML;
-    }
-
-    var projectRemarkWrap = document.getElementById('projectRemarkEditorWrap');
-    var projectRemarkEmpty = document.getElementById('projectRemarkEmpty');
-    var projectRemarkLockedBadge = document.getElementById('projectRemarkLockedBadge');
-    var quill = new Quill('#projectRemarkEditor', {
-        theme: 'snow',
-        placeholder: 'Enter project overview, assumptions, deployment notes, customer requirements, risks, rollback plan, or any additional project information...',
-        modules: {
-            toolbar: {
-                container: '#projectRemarkToolbar',
-                handlers: {
-                    undo: function() { quill.history.undo(); },
-                    redo: function() { quill.history.redo(); }
-                }
-            },
-            history: { delay: 800, maxStack: 200, userOnly: true }
-        }
-    });
-
-    if (data.projectRemark) {
-        quill.clipboard.dangerouslyPasteHTML(sanitizeRemarkHtml(data.projectRemark), 'silent');
-    }
-
-    function applyProjectRemarkViewState() {
-        var locked = !!data.projectRemarkLocked;
-        var isEmpty = quill.getText().trim().length === 0;
-        projectRemarkWrap.classList.toggle('locked', locked);
-        projectRemarkLockedBadge.hidden = !locked;
-        quill.enable(!locked);
-        var hideEditor = locked && isEmpty;
-        projectRemarkWrap.style.display = hideEditor ? 'none' : '';
-        projectRemarkEmpty.style.display = hideEditor ? '' : 'none';
-    }
-    applyProjectRemarkViewState();
-
-    quill.on('text-change', function() {
-        data.projectRemark = sanitizeRemarkHtml(quill.root.innerHTML);
-        sessionStorage.setItem('previewData', JSON.stringify(data));
-        applyProjectRemarkViewState();
     });
 
     // Clean up: remove categories with no tasks, tasks with no activities
@@ -638,19 +431,19 @@
             '<div class="summary-strip">' +
                 '<div class="ss-stat">' +
                     '<span class="ss-label">Estimate</span>' +
-                    '<span class="ss-val">' + totals.estimate + '</span>' +
+                    '<span class="ss-val">' + fmt2(totals.estimate) + '</span>' +
                     '<span class="ss-unit">h</span>' +
                 '</div>' +
                 '<div class="ss-sep"></div>' +
                 '<div class="ss-stat">' +
                     '<span class="ss-label">Buffer</span>' +
-                    '<span class="ss-val">' + totals.buffer + '</span>' +
+                    '<span class="ss-val">' + fmt2(totals.buffer) + '</span>' +
                     '<span class="ss-unit">h</span>' +
                 '</div>' +
                 '<div class="ss-sep"></div>' +
                 '<div class="ss-stat ss-total">' +
                     '<span class="ss-label">Total</span>' +
-                    '<span class="ss-val">' + totals.final + '</span>' +
+                    '<span class="ss-val">' + fmt2(totals.final) + '</span>' +
                     '<span class="ss-unit">h</span>' +
                 '</div>' +
                 '<div class="ss-counts">' +
@@ -677,7 +470,7 @@
                 '<div class="category-header d-flex align-items-center gap-2 px-3 py-2">' +
                     '<button class="del-btn flex-shrink-0" data-del="category" data-ci="' + ci + '" title="Delete category">&times;</button>' +
                     '<span class="editable category-name flex-grow-1" contenteditable="true" data-field="category" data-ci="' + ci + '">' + esc(cat.category) + '</span>' +
-                    '<small class="cat-meta text-nowrap" data-ci="' + ci + '">' + cat.tasks.length + ' task(s) &middot; ' + catTotal + 'h</small>' +
+                    '<small class="cat-meta text-nowrap" data-ci="' + ci + '">' + cat.tasks.length + ' task(s) &middot; ' + fmt2(catTotal) + 'h</small>' +
                 '</div>';
 
             // Tasks wrapper
@@ -695,25 +488,18 @@
                         '<span class="editable task-name flex-grow-1" contenteditable="true" data-field="task" data-ci="' + ci + '" data-ti="' + ti + '">' + esc(task.task) + '</span>' +
                         '<div class="task-stats">' +
                             '<span class="ts-label">Est</span>' +
-                            '<span data-sum="estimate" data-ci="' + ci + '" data-ti="' + ti + '" class="ts-num">' + task.estimate_hours + '</span>' +
+                            '<span data-sum="estimate" data-ci="' + ci + '" data-ti="' + ti + '" class="ts-num">' + fmt2(task.estimate_hours) + '</span>' +
                             '<span class="ts-unit">h</span>' +
                             '<span class="ts-sep">&middot;</span>' +
                             '<span class="ts-label">Buf</span>' +
-                            '<span class="editable ts-num" contenteditable="true" data-field="buffer" data-ci="' + ci + '" data-ti="' + ti + '">' + task.buffer_hours + '</span>' +
+                            '<span class="editable ts-num" contenteditable="true" data-field="buffer" data-ci="' + ci + '" data-ti="' + ti + '">' + fmt2(task.buffer_hours) + '</span>' +
                             '<span class="ts-unit">h</span>' +
                             '<span class="ts-sep">&middot;</span>' +
-                            '<strong class="ts-total"><span data-sum="final" data-ci="' + ci + '" data-ti="' + ti + '">' + task.total_hours + '</span>h</strong>' +
+                            '<strong class="ts-total"><span data-sum="final" data-ci="' + ci + '" data-ti="' + ti + '">' + fmt2(task.total_hours) + '</span>h</strong>' +
                         '</div>' +
                         '<button class="collapse-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" aria-expanded="true">' +
                             '<i class="bi bi-chevron-up"></i>' +
                         '</button>' +
-                    '</div>';
-
-                // Remarks row
-                html +=
-                    '<div class="task-remarks-row d-flex align-items-center gap-2 px-3 py-2">' +
-                        '<span class="ts-label flex-shrink-0">Remarks</span>' +
-                        '<span class="editable flex-grow-1" contenteditable="true" data-field="remarks" data-ci="' + ci + '" data-ti="' + ti + '" data-placeholder="Add remarks...">' + esc(task.remarks) + '</span>' +
                     '</div>';
 
                 // Activities (collapsible)
@@ -727,7 +513,7 @@
                             '<button class="del-btn flex-shrink-0" data-del="activity" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '" title="Delete activity">&times;</button>' +
                             '<span class="editable flex-grow-1" contenteditable="true" data-field="task_detail" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '">' + esc(act.task_detail) + '</span>' +
                             '<div class="d-flex align-items-center gap-1 act-hours-col justify-content-end">' +
-                                '<span class="editable act-est-input" contenteditable="true" data-field="act_estimate" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '">' + act.estimate_hours + '</span>' +
+                                '<span class="editable act-est-input" contenteditable="true" data-field="act_estimate" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '">' + fmt2(act.estimate_hours) + '</span>' +
                                 '<span class="act-h-label">h</span>' +
                             '</div>' +
                         '</div>';
@@ -767,9 +553,9 @@
         document.getElementById('previewFoot').innerHTML =
             '<div class="totals-panel">' +
                 '<span class="totals-label">Grand Total</span>' +
-                '<div class="total-item"><div class="total-item-label">Estimate</div><div class="total-item-val">' + totals.estimate + 'h</div></div>' +
-                '<div class="total-item"><div class="total-item-label">Buffer</div><div class="total-item-val">' + totals.buffer + 'h</div></div>' +
-                '<div class="total-item total-item-final"><div class="total-item-label">Grand Total</div><div class="total-item-val">' + totals.final + 'h</div></div>' +
+                '<div class="total-item"><div class="total-item-label">Estimate</div><div class="total-item-val">' + fmt2(totals.estimate) + 'h</div></div>' +
+                '<div class="total-item"><div class="total-item-label">Buffer</div><div class="total-item-val">' + fmt2(totals.buffer) + 'h</div></div>' +
+                '<div class="total-item total-item-final"><div class="total-item-label">Grand Total</div><div class="total-item-val">' + fmt2(totals.final) + 'h</div></div>' +
             '</div>';
     }
 
@@ -793,9 +579,7 @@
             categories: categories,
             totals: calcTotals(),
             projectName: projectNameInput.value,
-            createdBy: createdByInput.value,
-            projectRemark: data.projectRemark || '',
-            projectRemarkLocked: !!data.projectRemarkLocked
+            createdBy: createdByInput.value
         }));
     }
 
@@ -809,14 +593,14 @@
         // Update the estimate and final cells in the DOM without full re-render
         var estCell = document.querySelector('[data-sum="estimate"][data-ci="' + ci + '"][data-ti="' + ti + '"]');
         var finalCell = document.querySelector('[data-sum="final"][data-ci="' + ci + '"][data-ti="' + ti + '"]');
-        if (estCell) estCell.textContent = task.estimate_hours;
-        if (finalCell) finalCell.textContent = task.total_hours;
+        if (estCell) estCell.textContent = fmt2(task.estimate_hours);
+        if (finalCell) finalCell.textContent = fmt2(task.total_hours);
 
         // Update the category header meta pill (e.g. "1 task(s) · 3h")
         var catTotal = 0;
         categories[ci].tasks.forEach(function(t) { catTotal += t.total_hours; });
         var catMeta = document.querySelector('.cat-meta[data-ci="' + ci + '"]');
-        if (catMeta) catMeta.innerHTML = categories[ci].tasks.length + ' task(s) &middot; ' + catTotal + 'h';
+        if (catMeta) catMeta.innerHTML = categories[ci].tasks.length + ' task(s) &middot; ' + fmt2(catTotal) + 'h';
 
         renderFooter();
         renderSummary();
@@ -840,10 +624,6 @@
         }
         else if (field === 'task') {
             categories[ci].tasks[ti].task = val;
-            saveData();
-        }
-        else if (field === 'remarks') {
-            categories[ci].tasks[ti].remarks = val;
             saveData();
         }
         else if (field === 'task_detail') {
@@ -1005,7 +785,7 @@
         fetch('/export/excel', {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-CSRFToken': window.MHES.csrfToken()},
-            body: JSON.stringify({ projectName: pName, createdBy: cBy, projectRemark: data.projectRemark || '', categories: categories })
+            body: JSON.stringify({ projectName: pName, createdBy: cBy, categories: categories })
         })
         .then(function(response) {
             if (!response.ok) {
@@ -1030,18 +810,11 @@
             // now-redundant data as if it were still unsaved work.
             categories = [];
             data.categories = categories;
-            data.projectRemark = '';
-            data.projectRemarkLocked = false;
             projectNameInput.value = '';
             projectNameInput.classList.remove('is-invalid');
             createdByInput.value = '';
             createdByInput.classList.remove('is-invalid');
-            // quill.setText('') fires the 'text-change' listener above,
-            // which re-writes sessionStorage from `data` — so clear
-            // sessionStorage AFTER, to make sure it's the last write.
-            quill.setText('');
             sessionStorage.removeItem('previewData');
-            applyProjectRemarkViewState();
             showEmpty();
         })
         .catch(function(err) {
@@ -1057,6 +830,18 @@
         var div = document.createElement('div');
         div.textContent = str || '';
         return div.innerHTML;
+    }
+
+    // Display-only rounding to at most 2 decimal places (e.g.
+    // 7.966999999999998 -> "7.97", 7 -> "7") -- floating-point addition
+    // of many small hour values easily produces long, unreadable
+    // decimal tails; this never touches the underlying stored number,
+    // only what's shown/typed into a cell, so full precision is still
+    // used for every calculation.
+    function fmt2(n) {
+        n = Number(n);
+        if (!isFinite(n)) return '0';
+        return (Math.round(n * 100) / 100).toString();
     }
 
     // Safety net: if the tab/browser is closed (or refreshed, or the user
@@ -1075,8 +860,7 @@
             categories: categories,
             totals: calcTotals(),
             projectName: projectNameInput.value,
-            createdBy: createdByInput.value,
-            projectRemark: data.projectRemark || ''
+            createdBy: createdByInput.value
         });
         navigator.sendBeacon('/preview/temp/stashes', new Blob([payload], { type: 'application/json' }));
     });

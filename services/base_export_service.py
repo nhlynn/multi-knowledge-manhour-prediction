@@ -45,7 +45,6 @@ class ExportContext:
     categories: list[dict[str, Any]]
     project_name: str
     created_by: str
-    project_remark: str
     column_mapping: dict[str, Any] | None = None
     template_path: str | None = None
     template_config: dict[str, Any] | None = None
