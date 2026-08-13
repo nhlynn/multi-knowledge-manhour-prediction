@@ -202,7 +202,7 @@
                                 <td><small class="text-muted">{{ (f.export_date or '')[:19] | replace('T', ' ') }}</small></td>
                                 <td>{{ f.size_kb }} KB</td>
                                 <td class="text-end">{{ f.total_tasks }}</td>
-                                <td class="text-end">{{ f.total_hours }}</td>
+                                <td class="text-end">{{ f.total_hours|fmt2 }}</td>
                                 <td class="text-end">
                                     {% if f.file_exists %}
                                     <div class="export-actions">

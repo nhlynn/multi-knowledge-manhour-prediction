@@ -202,19 +202,19 @@
             '<div class="summary-strip mb-3">' +
                 '<div class="ss-stat">' +
                     '<span class="ss-label">Estimate</span>' +
-                    '<span class="ss-val">' + totals.estimate + '</span>' +
+                    '<span class="ss-val">' + fmt2(totals.estimate) + '</span>' +
                     '<span class="ss-unit">h</span>' +
                 '</div>' +
                 '<div class="ss-sep"></div>' +
                 '<div class="ss-stat">' +
                     '<span class="ss-label">Buffer</span>' +
-                    '<span class="ss-val">' + totals.buffer + '</span>' +
+                    '<span class="ss-val">' + fmt2(totals.buffer) + '</span>' +
                     '<span class="ss-unit">h</span>' +
                 '</div>' +
                 '<div class="ss-sep"></div>' +
                 '<div class="ss-stat ss-total">' +
                     '<span class="ss-label">Total</span>' +
-                    '<span class="ss-val">' + totals.final + '</span>' +
+                    '<span class="ss-val">' + fmt2(totals.final) + '</span>' +
                     '<span class="ss-unit">h</span>' +
                 '</div>' +
                 '<div class="ss-counts">' +
@@ -232,7 +232,7 @@
             html +=
                 '<div class="category-header d-flex align-items-center gap-2 px-3 py-2">' +
                     '<span class="category-name flex-grow-1">' + esc(cat.category) + '</span>' +
-                    '<small class="cat-meta text-nowrap">' + cat.tasks.length + ' task(s) &middot; ' + catTotal + 'h</small>' +
+                    '<small class="cat-meta text-nowrap">' + cat.tasks.length + ' task(s) &middot; ' + fmt2(catTotal) + 'h</small>' +
                 '</div>';
 
             html += '<div class="tasks-wrapper">';
@@ -243,14 +243,14 @@
                         '<span class="task-name flex-grow-1">' + esc(task.task) + '</span>' +
                         '<div class="task-stats">' +
                             '<span class="ts-label">Est</span>' +
-                            '<span class="ts-num">' + task.estimate_hours + '</span>' +
+                            '<span class="ts-num">' + fmt2(task.estimate_hours) + '</span>' +
                             '<span class="ts-unit">h</span>' +
                             '<span class="ts-sep">&middot;</span>' +
                             '<span class="ts-label">Buf</span>' +
-                            '<span class="ts-num">' + task.buffer_hours + '</span>' +
+                            '<span class="ts-num">' + fmt2(task.buffer_hours) + '</span>' +
                             '<span class="ts-unit">h</span>' +
                             '<span class="ts-sep">&middot;</span>' +
-                            '<strong class="ts-total">' + task.total_hours + 'h</strong>' +
+                            '<strong class="ts-total">' + fmt2(task.total_hours) + 'h</strong>' +
                         '</div>' +
                     '</div>';
 
@@ -260,7 +260,7 @@
                         '<div class="activity-row d-flex align-items-center gap-2 px-3 py-2">' +
                             '<span class="flex-grow-1">' + esc(act.task_detail) + '</span>' +
                             '<div class="d-flex align-items-center gap-1 act-hours-col justify-content-end">' +
-                                '<span class="fw-bold">' + act.estimate_hours + '</span>' +
+                                '<span class="fw-bold">' + fmt2(act.estimate_hours) + '</span>' +
                                 '<span class="act-h-label">h</span>' +
                             '</div>' +
                         '</div>';
@@ -275,9 +275,9 @@
         html +=
             '<div class="totals-panel mt-3">' +
                 '<span class="totals-label">Grand Total</span>' +
-                '<div class="total-item"><div class="total-item-label">Estimate</div><div class="total-item-val">' + totals.estimate + 'h</div></div>' +
-                '<div class="total-item"><div class="total-item-label">Buffer</div><div class="total-item-val">' + totals.buffer + 'h</div></div>' +
-                '<div class="total-item total-item-final"><div class="total-item-label">Grand Total</div><div class="total-item-val">' + totals.final + 'h</div></div>' +
+                '<div class="total-item"><div class="total-item-label">Estimate</div><div class="total-item-val">' + fmt2(totals.estimate) + 'h</div></div>' +
+                '<div class="total-item"><div class="total-item-label">Buffer</div><div class="total-item-val">' + fmt2(totals.buffer) + 'h</div></div>' +
+                '<div class="total-item total-item-final"><div class="total-item-label">Grand Total</div><div class="total-item-val">' + fmt2(totals.final) + 'h</div></div>' +
             '</div>';
 
         html += '</div>'; // card-body
@@ -368,6 +368,18 @@
         var div = document.createElement('div');
         div.textContent = str || '';
         return div.innerHTML;
+    }
+
+    // Display-only rounding to at most 2 decimal places (e.g.
+    // 77.96699999999998 -> "77.97") -- same helper as Preview/Chatbot's
+    // own fmt2(), needed here for the same reason: totals summed from
+    // many small floating-point hour values otherwise show long,
+    // unreadable decimal tails. Never touches the underlying stored
+    // number, only what's shown.
+    function fmt2(n) {
+        n = Number(n);
+        if (!isFinite(n)) return '0';
+        return (Math.round(n * 100) / 100).toString();
     }
 })();
 </script>

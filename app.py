@@ -124,6 +124,27 @@ def create_app(config_name: str = "development") -> Flask:
     def inject_csrf_token() -> dict:
         return {"csrf_token": get_csrf_token}
 
+    @app.template_filter("fmt2")
+    def fmt2_filter(value) -> str:
+        """Round a number to at most 2 decimal places for display,
+        trimming an unnecessary trailing ".0"/"00" (e.g.
+        103.95599999999996 -> "103.96", 77.0 -> "77") -- the
+        server-rendered counterpart to the ``fmt2()`` JS helper used on
+        Preview/Chatbot for the exact same reason: hour totals built up
+        from many small floating-point additions otherwise display
+        with long, unreadable decimal tails. Never touches the
+        underlying stored number, only what's shown. Used by
+        templates/exported_files.html, templates/temp_data.html, and
+        templates/temp_data_detail.html.
+        """
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            return value
+        rounded = round(num, 2)
+        formatted = f"{rounded:.2f}"
+        return formatted.rstrip("0").rstrip(".")
+
     # Register error handlers
     _register_error_handlers(app)
 

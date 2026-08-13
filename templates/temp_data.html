@@ -377,7 +377,7 @@
                     '<td>' + esc(stash.projectName || 'Untitled stash') + '</td>' +
                     '<td>' + esc(stash.createdBy || '-') + '</td>' +
                     '<td><small class="text-muted">' + esc(formatStashedAt(stash.stashedAt)) + '</small></td>' +
-                    '<td class="text-end">' + calcTotalHours(stash) + 'h</td>' +
+                    '<td class="text-end">' + fmt2(calcTotalHours(stash)) + 'h</td>' +
                     '<td><span class="badge bg-warning text-dark">Pending</span></td>' +
                     '<td class="text-end">' +
                         '<div class="temp-actions">' +
@@ -458,6 +458,17 @@
         var div = document.createElement('div');
         div.textContent = str || '';
         return div.innerHTML;
+    }
+
+    // Display-only rounding to at most 2 decimal places (e.g.
+    // 77.96699999999998 -> "77.97") -- same helper as Preview/Chatbot's
+    // own fmt2(), needed here for the same reason: totals summed from
+    // many small floating-point hour values otherwise show long,
+    // unreadable decimal tails.
+    function fmt2(n) {
+        n = Number(n);
+        if (!isFinite(n)) return '0';
+        return (Math.round(n * 100) / 100).toString();
     }
 })();
 </script>
