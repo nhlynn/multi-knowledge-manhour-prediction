@@ -56,6 +56,19 @@ theirs:
   category/task/priority/status/hours/remarks. Only a row a selected
   function is actually written into gets new values; a row this export
   doesn't use is left blank, not stale.
+- 優先度/難易度 and ステータス are written from a task's own
+  ``priority``/``status`` fields when present -- captured at import
+  time from ``詳細見積_マスタと予実比較``'s own same-named columns (see
+  ``services/sgl_import_parser.py``) and carried through Preview/search
+  generically, the same mechanism ``work_detail``/``block`` use. Both
+  were previously resolved and cleared here but never actually
+  written back (a real gap, not by design -- caught alongside
+  ``services/bamawl_export_builder.py``'s analogous ``Status`` gap);
+  and ``services/sgl_import_parser.py`` never captured either column
+  into task data in the first place, so there was nothing to write
+  even before this. Left blank only for a task with no such value
+  (e.g. one added directly in Preview, never imported from a
+  workbook).
 - The other worksheet, "見積・金額サマリ", has its own literal sample
   project title in cell A1 (e.g. "サンプルチェック改修" in the shipped
   template) -- also unrelated data with nothing to do with any
@@ -506,6 +519,12 @@ def build_sgl_workbook(
         work_detail = task.get("work_detail")
         if work_detail:
             _set_cell(ws, row, work_detail_col, str(work_detail))
+        priority = task.get("priority")
+        if priority:
+            _set_cell(ws, row, priority_col, str(priority))
+        status = task.get("status")
+        if status:
+            _set_cell(ws, row, status_col, str(status))
 
         # Every phase column on a populated row is deterministically
         # set to exactly what Preview provided for that phase, or

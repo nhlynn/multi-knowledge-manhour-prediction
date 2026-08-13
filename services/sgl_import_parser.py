@@ -50,6 +50,8 @@ _CATEGORY_HEADER = "区分"
 _TASK_HEADER = "項目"
 _PHASE_GROUP_HEADER = "工数（人時間）"
 _WORK_DETAIL_HEADER = "作業詳細"
+_PRIORITY_HEADER = "優先度/難易度"
+_STATUS_HEADER = "ステータス"
 
 # Column B (no row-2 header text of its own) holds each labeled
 # block's section heading (e.g. "ユーザマスタ", "部署マスター",
@@ -116,6 +118,8 @@ def sgl_excel_to_nested_json(excel_path: str) -> list[dict[str, Any]]:
     task_col = header_columns.get(_TASK_HEADER)
     phase_group_col = header_columns.get(_PHASE_GROUP_HEADER)
     work_detail_col = header_columns.get(_WORK_DETAIL_HEADER)
+    priority_col = header_columns.get(_PRIORITY_HEADER)
+    status_col = header_columns.get(_STATUS_HEADER)
 
     if not (category_col and task_col and phase_group_col):
         logger.warning(
@@ -166,8 +170,19 @@ def sgl_excel_to_nested_json(excel_path: str) -> list[dict[str, Any]]:
             wd_val = ws.cell(row=row, column=work_detail_col).value
             row_work_detail = str(wd_val).strip() if wd_val is not None else ""
 
+        row_priority = ""
+        if priority_col:
+            priority_val = ws.cell(row=row, column=priority_col).value
+            row_priority = str(priority_val).strip() if priority_val is not None else ""
+
+        row_status = ""
+        if status_col:
+            status_val = ws.cell(row=row, column=status_col).value
+            row_status = str(status_val).strip() if status_val is not None else ""
+
         _add_task_activities(
-            all_categories, current_category, task, row_activities, row_work_detail, current_block,
+            all_categories, current_category, task, row_activities, row_work_detail,
+            current_block, row_priority, row_status,
         )
 
     result = _build_nested_output(all_categories)
@@ -206,12 +221,14 @@ def _add_task_activities(
     row_activities: list[tuple[str, float]],
     row_work_detail: str = "",
     block: str = "",
+    row_priority: str = "",
+    row_status: str = "",
 ) -> None:
     """Fold one task row's phase activities (作業詳細 text, and its
     section block label, if any) into ``all_categories``, creating the
     category/task entries as needed -- same accumulator shape
     ``services.excel_parser._process_phases_row`` builds, plus SGL's
-    own ``work_detail`` and ``block`` fields.
+    own ``work_detail``, ``block``, ``priority``, and ``status`` fields.
 
     ``block`` (column B's section heading -- "ユーザマスタ",
     "部署マスター", "予算実績管理", "その他") is a coarser grouping than
@@ -229,6 +246,15 @@ def _add_task_activities(
     accumulate across its rows. ``block`` is set once, from the first
     row a task is seen on (a task never spans two different blocks in
     this template's layout).
+
+    ``priority``/``status`` (優先度/難易度, ステータス) are single-value
+    fields, not free text -- unlike ``work_detail``, a later row's
+    value is never appended to an earlier one. The FIRST non-blank
+    value seen for a task wins; later rows (whether blank, or
+    repeating the same value) never overwrite it. This mirrors
+    ``block``'s "set once, from the first row" behavior above, for
+    the same reason: a multi-row task's priority/status is one fact
+    about the task, not one per row.
     """
     cat_slug = _slugify(category)
     task_slug = _slugify(task)
@@ -241,7 +267,7 @@ def _add_task_activities(
     if task_key not in cat_data["tasks"]:
         cat_data["tasks"][task_key] = {
             "task": task, "buffer_hours": 0.0, "activities": [],
-            "work_detail": "", "block": block,
+            "work_detail": "", "block": block, "priority": "", "status": "",
         }
     task_data = cat_data["tasks"][task_key]
 
@@ -258,3 +284,9 @@ def _add_task_activities(
             f"{task_data['work_detail']}\n{row_work_detail}"
             if task_data["work_detail"] else row_work_detail
         )
+
+    if row_priority and not task_data["priority"]:
+        task_data["priority"] = row_priority
+
+    if row_status and not task_data["status"]:
+        task_data["status"] = row_status
