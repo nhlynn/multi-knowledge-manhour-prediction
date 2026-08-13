@@ -144,6 +144,12 @@
     .task-header:hover { background: #d9d9d9; box-shadow: inset 3px 0 0 #6366f1; }
     .task-name { font-size: 0.875rem; font-weight: 600; color: #1e293b; line-height: 1.4; }
 
+    /* ── Difficulty/priority badge (Bamawl "status", KiKan "status", SGL "priority" -- one display label for all three) ── */
+    .task-difficulty {
+        font-size: 0.68rem; font-weight: 600; color: #633806; background: #faeeda;
+        border-radius: 999px; padding: 3px 10px; flex-shrink: 0; white-space: nowrap;
+    }
+
     /* ── Task stats (inline, replaces heavy pill) ── */
     .task-stats {
         display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; white-space: nowrap;
@@ -481,11 +487,28 @@
 
                 html += '<div class="task-block">';
 
+                // Difficulty/priority badge -- Bamawl and KiKan store this
+                // under task.status (難しい/簡単/普通, or 大/中/小); SGL
+                // stores its own separate concept under task.priority
+                // (優先度/難易度). Only one of the two is ever populated
+                // for a given team's data, so this falls back between
+                // them and shows whichever is present under one unified
+                // "Difficulty" badge, next to the task name -- SGL's own
+                // separate ステータス (workflow status: 未定/確認中/完了/...)
+                // is a different field entirely and is not shown here.
+                var difficultyVal = task.priority || task.status || '';
+                var difficultyHtml = difficultyVal
+                    ? '<span class="task-difficulty" title="Difficulty">' + esc(difficultyVal) + '</span>'
+                    : '';
+
                 // Task header row — no add button here
                 html +=
                     '<div class="task-header d-flex align-items-center gap-2 px-3 py-2">' +
                         '<button class="del-btn flex-shrink-0" data-del="task" data-ci="' + ci + '" data-ti="' + ti + '" title="Delete task">&times;</button>' +
-                        '<span class="editable task-name flex-grow-1" contenteditable="true" data-field="task" data-ci="' + ci + '" data-ti="' + ti + '">' + esc(task.task) + '</span>' +
+                        '<div class="d-flex align-items-center gap-2 flex-grow-1" style="min-width:0;">' +
+                            '<span class="editable task-name" contenteditable="true" data-field="task" data-ci="' + ci + '" data-ti="' + ti + '" style="min-width:0;">' + esc(task.task) + '</span>' +
+                            difficultyHtml +
+                        '</div>' +
                         '<div class="task-stats">' +
                             '<span class="ts-label">Est</span>' +
                             '<span data-sum="estimate" data-ci="' + ci + '" data-ti="' + ti + '" class="ts-num">' + fmt2(task.estimate_hours) + '</span>' +
