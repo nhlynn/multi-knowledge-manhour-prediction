@@ -48,6 +48,30 @@ import-only or export-only template file:
   them in manually after export. Only the value cell next to each
   label is cleared; the label text, its formatting, and its merged
   range are untouched.
+- ``ALL_Detail``'s ``Status`` column is written from a task's own
+  ``status`` field when present -- captured at import time from
+  ``ALL_Detail``'s own ``Status`` column (see
+  ``utils/migrations/bamawl_import_export_config.py``'s
+  ``extra_columns``) and carried through Preview/search generically,
+  the same mechanism KiKan's own ``Status`` column and SGL's own
+  ``work_detail`` field use. Left blank only for a task with no such
+  value (e.g. a brand-new function added directly in Preview, never
+  imported from a workbook).
+- ``TotalManhour``'s data rows are entirely rewritten from
+  ``TOTAL_MANHOUR_GROUPS`` -- each row's value computed as the sum,
+  across this export's tasks, of a set of ``ALL_Detail`` phase labels
+  (Development, Code Review, Requirement definition, Basic overall
+  design, Basic design, Unit Test, Combined Test, Comprehensive Test,
+  Test Data Creation, User Manual, Accidental Work, Risk, Management
+  Manhours) -- see ``_populate_total_manhour``. This replaces both the
+  old template-baked placeholder numbers (Infra setup, Deployment,
+  Training, Operations Support, Maintenance, Device Test -- none of
+  which had any corresponding MHES field, and never changed between
+  exports) and ``Development``'s old ``=ALL_Detail!AD15`` fixed-row
+  formula (which could silently mismatch if a project's task count
+  differed from the template's own built-in sample range -- see the
+  "Known limitation" note above). The トータル(hr/1person)/(days/
+  1person)/(month/1person) block's own formulas are untouched.
 - ``Business Flow(system admin)``'s content -- confirmed to be exactly
   one embedded picture, no shapes/SmartArt/text boxes/connectors --
   is always stripped from the export. The worksheet itself is kept
@@ -117,6 +141,65 @@ REQ_DEFINITION_BLANK_SECTION_LABELS = [
 # connectors, or SmartArt. Stripped entirely on export -- see
 # _strip_business_flow_content.
 BUSINESS_FLOW_SHEET = "Business Flow(system admin)"
+
+# TotalManhour's own row/column layout -- see _populate_total_manhour.
+TOTAL_MANHOUR_SHEET = "TotalManhour"
+TOTAL_MANHOUR_LABEL_COLUMN = 2  # B
+TOTAL_MANHOUR_VALUE_COLUMN = 3  # C
+TOTAL_MANHOUR_TOTAL_LABEL_PREFIX = "トータル"
+
+# Each row of TotalManhour is now one of these groups -- its value is
+# the sum, across every task in the export, of the listed
+# ALL_Detail/phase_columns labels (the same "label" strings configured
+# in BAMAWL_IMPORT_COLUMN_MAPPING["phase_columns"], and the same ones
+# _phase_value already matches an activity's task_detail against when
+# writing ALL_Detail's own per-task phase columns). Order here is the
+# row order written into the sheet.
+#
+# Every one of BAMAWL_IMPORT_COLUMN_MAPPING's 26 phase labels is
+# accounted for in exactly one group below -- deliberately, so this
+# breakdown's grand total (the トータル block, which just sums whatever
+# is in these rows) never silently drops part of ALL_Detail's data.
+# "Test Data Creation" has its own row for this reason even though it
+# wasn't named as one of the original requested categories -- flag to
+# a human if it should instead be folded into an existing group (e.g.
+# Unit Test or Combined Test) or removed.
+TOTAL_MANHOUR_GROUPS: list[tuple[str, list[str]]] = [
+    ("Development", ["Development"]),
+    ("Code Review", ["Code Review"]),
+    ("Requirement definition", ["Prototype", "Prototype Review"]),
+    ("Basic overall design", [
+        "Business Flow", "Business Flow Review",
+        "ERD", "ERD Review", "DFD", "DFD Review",
+        "DB Design", "DB Design Review",
+    ]),
+    ("Basic design", ["Screen/Form/Function", "Screen/Form/Function Review"]),
+    ("Unit Test", [
+        "Unit Test Specification", "Unit Test Review", "Unit Test Implementation",
+    ]),
+    ("Combined Test", [
+        "Combined Test Specification", "Combined Test Review", "Combined Test Implementation",
+    ]),
+    ("Comprehensive Test", ["Comprehensive Test Implementation"]),
+    ("Test Data Creation", ["Test Data Creation"]),
+    ("User Manual", ["User Manual"]),
+    ("Accidental Work", ["Accidental Work"]),
+    ("Risk", ["Risk"]),
+    ("Management Manhours", ["Management Manhours"]),
+]
+
+# ALL_Detail's "Status" column (see BAMAWL_ALL_DETAIL_HEADERS in
+# utils/migrations/bamawl_import_export_config.py) isn't part of
+# column_mapping's phase_columns -- it's captured on import via that
+# same config's "extra_columns" (a task's Status cell -> task["status"],
+# same mechanism KiKan's own "Status" column uses) and written back out
+# here by column NAME (resolved through _resolve_template_columns, not
+# hardcoded), so a task with a status value round-trips through
+# export exactly like KiKan's does. A task with no status (e.g. one
+# added directly in Preview rather than imported from a workbook) is
+# simply left blank -- same reasoning Bamawl's export already blanks
+# ReqDefinition's free-text sections.
+STATUS_COLUMN_NAME = "Status"
 
 
 class BamawlExportError(ValueError):
@@ -320,6 +403,95 @@ def _blank_req_definition_sections(wb) -> None:
     logger.info("Blanked %d '%s' section value(s): %s", len(blanked), REQ_DEFINITION_SHEET, blanked)
 
 
+def _populate_total_manhour(wb, tasks: list[dict[str, Any]]) -> None:
+    """Rewrite every ``TotalManhour`` data row from ``TOTAL_MANHOUR_GROUPS``,
+    each row's value computed as the sum, across every task in this
+    export, of its listed phase labels' ``estimate_hours`` (via the
+    same ``_phase_value`` helper used to write ``ALL_Detail``'s own
+    per-task phase columns) -- so every row is now genuinely derived
+    from this export's own data, replacing the old template-baked
+    placeholder numbers (Infra setup, Deployment, Training, Operations
+    Support, Maintenance, Device Test) that had no corresponding MHES
+    field and never changed between exports.
+
+    This also replaces ``Development``'s old ``=ALL_Detail!AD15``
+    formula with a plain computed value -- summed directly here rather
+    than referencing a fixed row in ``ALL_Detail``, so it no longer
+    depends on the current project's task count matching the
+    template's own built-in sample-row range (see this module's
+    "Known limitation" note above ``build_bamawl_workbook``, which no
+    longer applies to this sheet).
+
+    Every label (column B) and value (column C) in the sheet's old
+    data-row block is cleared first, then rewritten one row per
+    ``TOTAL_MANHOUR_GROUPS`` entry starting at row 2 -- so no leftover
+    old label (e.g. a since-removed placeholder row) can survive past
+    however many groups are configured. The trailing トータル
+    (hr/1person)/(days/1person)/(month/1person) block's own
+    ``SUM``/division formulas are left completely untouched; they
+    continue to total whatever is now in the rewritten rows.
+
+    Raises:
+        BamawlExportError: if ``TOTAL_MANHOUR_GROUPS`` has more rows
+            than the sheet has room for before its トータル block.
+    """
+    if TOTAL_MANHOUR_SHEET not in wb.sheetnames:
+        logger.warning(
+            "Bamawl Team's export template has no '%s' worksheet; skipping "
+            "TotalManhour breakdown.", TOTAL_MANHOUR_SHEET,
+        )
+        return
+
+    ws = wb[TOTAL_MANHOUR_SHEET]
+
+    data_start_row = 2
+    total_row = None
+    for r in range(data_start_row, ws.max_row + 1):
+        label = ws.cell(row=r, column=TOTAL_MANHOUR_LABEL_COLUMN).value
+        if label and str(label).strip().startswith(TOTAL_MANHOUR_TOTAL_LABEL_PREFIX):
+            total_row = r
+            break
+
+    if total_row is None:
+        logger.warning(
+            "Bamawl export: could not locate the '%s' total block in '%s'; "
+            "skipping TotalManhour breakdown to avoid guessing at the wrong rows.",
+            TOTAL_MANHOUR_TOTAL_LABEL_PREFIX, TOTAL_MANHOUR_SHEET,
+        )
+        return
+
+    capacity = total_row - data_start_row
+    if len(TOTAL_MANHOUR_GROUPS) > capacity:
+        raise BamawlExportError(
+            f"TOTAL_MANHOUR_GROUPS has {len(TOTAL_MANHOUR_GROUPS)} row(s), but "
+            f"'{TOTAL_MANHOUR_SHEET}' only has room for {capacity} before its "
+            f"'{TOTAL_MANHOUR_TOTAL_LABEL_PREFIX}' total block."
+        )
+
+    # Clear the sheet's entire old data-row block (label + value) first,
+    # so no leftover label/number from a previous layout survives past
+    # however many groups are written back below.
+    for r in range(data_start_row, total_row):
+        ws.cell(row=r, column=TOTAL_MANHOUR_LABEL_COLUMN).value = None
+        ws.cell(row=r, column=TOTAL_MANHOUR_VALUE_COLUMN).value = None
+
+    all_activities = [task.get("activities", []) or [] for task in tasks]
+    for i, (group_label, phase_labels) in enumerate(TOTAL_MANHOUR_GROUPS):
+        row = data_start_row + i
+        total = sum(
+            _phase_value(activities, phase_label)
+            for activities in all_activities
+            for phase_label in phase_labels
+        )
+        ws.cell(row=row, column=TOTAL_MANHOUR_LABEL_COLUMN, value=group_label)
+        ws.cell(row=row, column=TOTAL_MANHOUR_VALUE_COLUMN, value=total)
+
+    logger.info(
+        "Rewrote '%s' with %d group row(s), computed from %d task(s)' ALL_Detail "
+        "phase data.", TOTAL_MANHOUR_SHEET, len(TOTAL_MANHOUR_GROUPS), len(tasks),
+    )
+
+
 def _strip_business_flow_content(wb) -> None:
     """Remove every editable business-flow element from the
     ``Business Flow(system admin)`` worksheet -- diagrams, flowcharts,
@@ -421,6 +593,7 @@ def build_bamawl_workbook(
         )
     id_col = _column_index(name_to_col, column_mapping.get("id_column"))
     total_col = _column_index(name_to_col, column_mapping.get("total_column"))
+    status_col = _column_index(name_to_col, STATUS_COLUMN_NAME)
     phase_cols = [
         (phase["label"], _column_index(name_to_col, phase["column"]))
         for phase in column_mapping.get("phase_columns", [])
@@ -458,6 +631,11 @@ def build_bamawl_workbook(
         if id_col:
             ws.cell(row=row, column=id_col, value=i)
         ws.cell(row=row, column=task_col, value=task.get("task", ""))
+
+        if status_col:
+            status = task.get("status")
+            if status:
+                ws.cell(row=row, column=status_col, value=status)
 
         activities_sum = 0.0
         for label, col_idx in phase_cols:
@@ -497,6 +675,7 @@ def build_bamawl_workbook(
     _populate_function_list(wb, [task.get("task", "") for task in tasks])
     _populate_req_definition_title(wb, project_name)
     _blank_req_definition_sections(wb)
+    _populate_total_manhour(wb, tasks)
     _strip_business_flow_content(wb)
 
     wb.save(filepath)

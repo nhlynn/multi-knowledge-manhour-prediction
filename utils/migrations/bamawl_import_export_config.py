@@ -24,6 +24,15 @@ structure. This migration replaces that row's contents outright (an
 explicit ``upsert``, not "seed if missing"), specifically and only for
 the team named "Bamawl Team". No other team's configuration is read or
 written.
+
+v2: ``BAMAWL_IMPORT_COLUMN_MAPPING`` gained an ``extra_columns`` entry
+for ``ALL_Detail``'s ``Status`` column (same mechanism KiKan's own
+``Status`` column already used) -- v1 never declared it, so Status was
+silently dropped on import and therefore always came out blank on
+export regardless of what ``services/bamawl_export_builder.py`` did.
+The migration name was bumped (``_v1`` -> ``_v2``) so this correction
+re-seeds even for databases where v1 already ran and marked itself
+applied.
 """
 
 import logging
@@ -33,7 +42,7 @@ from database.db import get_connection, mark_migration_applied, migration_applie
 
 logger = logging.getLogger(__name__)
 
-_BAMAWL_CONFIG_MIGRATION_NAME = "seed_bamawl_import_export_config_v1"
+_BAMAWL_CONFIG_MIGRATION_NAME = "seed_bamawl_import_export_config_v2"
 
 BAMAWL_TEAM_NAME = "Bamawl Team"
 
@@ -149,6 +158,18 @@ BAMAWL_IMPORT_COLUMN_MAPPING: dict[str, Any] = {
         {"label": "Management Manhours", "column": "管理工数(h) Management Manhours"},
     ],
     "total_column": "Total(h)",
+    # Same mechanism as KiKan's own "Status" column (see
+    # utils/migrations/kikan_import_export_config.py) -- captures the
+    # ALL_Detail sheet's real "Status" column (present in
+    # BAMAWL_ALL_DETAIL_HEADERS above) verbatim onto each task's
+    # "status" field, passed through generically all the way to
+    # Preview/export by services/excel_parser.py's own extra_columns
+    # handling. Previously missing here, which is why Status was never
+    # captured on import and therefore never available to write back
+    # out on export (see services/bamawl_export_builder.py).
+    "extra_columns": [
+        {"field": "status", "column": "Status"},
+    ],
 }
 
 # Bamawl's export uses the same standard layout every unconfigured team
