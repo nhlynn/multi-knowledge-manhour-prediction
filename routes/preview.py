@@ -3,7 +3,7 @@
 Handles knowledge base data preview and browsing.
 """
 
-from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, session, url_for
 
 from scheduler.temp_data_service import TempDataService
 from utils.pagination import parse_page_param, total_pages_for
@@ -16,6 +16,19 @@ preview_bp.before_request(require_login)
 
 def _temp_data_service() -> TempDataService:
     return TempDataService(db_path=current_app.config["MHES_DB_PATH"])
+
+
+def _team_id_filter() -> int | None:
+    """Return the ``team_id`` to scope Temporary Data reads to.
+
+    None means "no filter" (see every team's stashes) — Admin only.
+    Every other role only ever sees their own team's stashes. Mirrors
+    ``routes/export.py``'s identical ``_team_id_filter`` for Export
+    History.
+    """
+    if session.get("role") == "Admin":
+        return None
+    return session.get("team_id")
 
 
 @preview_bp.route("/", methods=["GET"])
@@ -46,7 +59,7 @@ def temp_data_page() -> str:
 @preview_bp.route("/temp/<stash_id>", methods=["GET"])
 def temp_data_detail_page(stash_id: str) -> str:
     """Render the full estimate detail for a single stashed snapshot."""
-    if not _temp_data_service().exists(stash_id):
+    if not _temp_data_service().exists(stash_id, team_id=_team_id_filter()):
         flash("Temporary data not found. It may have already been restored or discarded.", "warning")
         return redirect(url_for("preview.temp_data_page"))
     return render_template("temp_data_detail.html", stash_id=stash_id)
@@ -54,8 +67,9 @@ def temp_data_detail_page(stash_id: str) -> str:
 
 @preview_bp.route("/temp/stashes", methods=["GET"])
 def list_stashes():
-    """Return all stashed Preview snapshots as JSON."""
-    return jsonify(_temp_data_service().list_stashes())
+    """Return all stashed Preview snapshots as JSON, scoped to the
+    caller's own team (every team's, for Admin)."""
+    return jsonify(_temp_data_service().list_stashes(team_id=_team_id_filter()))
 
 
 TEMP_STASHES_PER_PAGE = 10
@@ -73,9 +87,11 @@ def list_stashes_page():
     to_date = (request.args.get("to_date") or "").strip()
     project_name = (request.args.get("project_name") or "").strip()
     page = parse_page_param(request.args.get("page"))
+    team_filter = _team_id_filter()
 
     service = _temp_data_service()
     items, total = service.list_stashes_page(
+        team_id=team_filter,
         page=page,
         per_page=TEMP_STASHES_PER_PAGE,
         from_date=from_date or None,
@@ -86,6 +102,7 @@ def list_stashes_page():
     if page > total_pages:
         page = total_pages
         items, total = service.list_stashes_page(
+            team_id=team_filter,
             page=page,
             per_page=TEMP_STASHES_PER_PAGE,
             from_date=from_date or None,
@@ -105,7 +122,7 @@ def list_stashes_page():
 @preview_bp.route("/temp/stashes/<stash_id>", methods=["GET"])
 def get_stash(stash_id: str):
     """Return a single stashed Preview snapshot as JSON."""
-    stash = _temp_data_service().get_by_key(stash_id)
+    stash = _temp_data_service().get_by_key(stash_id, team_id=_team_id_filter())
     if stash is None:
         return jsonify({"error": "Stash not found."}), 404
     return jsonify(stash)
@@ -129,6 +146,11 @@ def create_stash():
         totals=data.get("totals") or {},
         project_name=data.get("projectName") or "",
         created_by=data.get("createdBy") or "",
+        # Always the creating user's own team, never
+        # _team_id_filter()'s "every team" (None for Admin) -- a
+        # stash always belongs to exactly one real team, regardless of
+        # who created it.
+        team_id=session["team_id"],
     )
     return jsonify(stash), 201
 
@@ -136,7 +158,7 @@ def create_stash():
 @preview_bp.route("/temp/stashes/<stash_id>", methods=["DELETE"])
 def delete_stash(stash_id: str):
     """Remove a single stash by id."""
-    removed = _temp_data_service().remove_stash(stash_id)
+    removed = _temp_data_service().remove_stash(stash_id, team_id=_team_id_filter())
     if not removed:
         return jsonify({"error": "Stash not found."}), 404
     return jsonify({"ok": True})

@@ -61,6 +61,23 @@ def migrate_stashes_json_to_sqlite(temp_data_folder: str, mhes_db_path: str) -> 
         return 0
 
     repo = TempRepository(mhes_db_path)
+
+    # Legacy stashes predate any team concept -- backfilled onto the
+    # default team, same as TempRepository._ensure_team_id_column does
+    # for rows already sitting in temp_stashes (this covers the
+    # separate "still a raw stashes.json file, never even reached
+    # temp_stashes yet" case).
+    from repositories.team_repository import TeamRepository
+
+    default_team = TeamRepository(mhes_db_path).get_by_slug(DEFAULT_TEAM_SLUG)
+    default_team_id = default_team["id"] if default_team else None
+    if default_team_id is None:
+        logger.warning(
+            "Legacy stash migration: default team %r does not exist yet; "
+            "migrated stashes will have no team_id and won't be visible to "
+            "any team until backfilled later.", DEFAULT_TEAM_SLUG,
+        )
+
     migrated = 0
     for stash in legacy_stashes:
         stash_id = stash.get("id")
@@ -85,6 +102,7 @@ def migrate_stashes_json_to_sqlite(temp_data_folder: str, mhes_db_path: str) -> 
                 },
                 ensure_ascii=False,
             ),
+            "team_id": default_team_id,
             "created_at": created_at,
             "expires_at": None,
         }
@@ -176,11 +194,20 @@ def _read_legacy_rows(db_path: str, table_name: str) -> list[sqlite3.Row]:
 
 
 def _merge_temp_stashes(legacy_db_path: str, mhes_db_path: str) -> int:
+    from repositories.team_repository import TeamRepository
     from repositories.temp_repository import TempRepository
 
     rows = _read_legacy_rows(legacy_db_path, "temp_stashes")
     if not rows:
         return 0
+
+    # Legacy rows predate any team concept -- attribute them all to the
+    # default team, same reasoning/pattern as _merge_export_history's
+    # own backfill just above. A row already carrying its own team_id
+    # (a legacy DB merged after team-scoping existed) keeps it;
+    # setdefault only fills in rows that have none.
+    default_team = TeamRepository(mhes_db_path).get_by_slug(DEFAULT_TEAM_SLUG)
+    default_team_id = default_team["id"] if default_team else None
 
     repo = TempRepository(mhes_db_path)
     migrated = 0
@@ -188,6 +215,8 @@ def _merge_temp_stashes(legacy_db_path: str, mhes_db_path: str) -> int:
         record = dict(row)
         if repo.exists(record["id"]):
             continue
+        if not record.get("team_id"):
+            record["team_id"] = default_team_id
         try:
             repo.insert(record)
             migrated += 1
