@@ -321,7 +321,10 @@ class ExportHistoryService:
             per_page: Number of records per page.
             team_id: If given, only include records belonging to this
                 team (Phase 6). None returns records across every team —
-                ``routes/export.py`` only passes None for Admin.
+                ``routes/export.py`` passes None for Admin with no Team
+                filter chosen, or a specific team's id either for a
+                non-Admin role or an Admin who narrowed the Team dropdown
+                (see ``_team_id_list_filter``).
             from_date: Only include records with an export date (``yyyy-mm-dd``,
                 taken from the leading 10 characters of ``export_date``) on
                 or after this date.

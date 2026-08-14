@@ -132,6 +132,17 @@
                             <i class="bi bi-calendar3 date-picker-icon"></i>
                         </div>
                     </div>
+                    {% if teams is not none %}
+                    <div class="col-12 col-sm-6 col-lg-2">
+                        <label class="form-label" for="filterTeam">Team</label>
+                        <select id="filterTeam" class="form-select form-select-sm">
+                            <option value="">All Teams</option>
+                            {% for team in teams %}
+                            <option value="{{ team.id }}">{{ team.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endif %}
                     <div class="col-12 col-lg-3">
                         <label class="form-label" for="filterProjectName">Project Name</label>
                         <input type="text" id="filterProjectName" class="form-control form-control-sm" placeholder="Search project name...">
@@ -177,6 +188,9 @@
                         <thead class="table-dark">
                             <tr>
                                 <th>Project Name</th>
+                                {% if teams is not none %}
+                                <th>Team</th>
+                                {% endif %}
                                 <th>Created By</th>
                                 <th>Created Date</th>
                                 <th class="text-end">Total Man Hour</th>
@@ -201,6 +215,7 @@
 <script>
 (function() {
     var STASHES_PAGE_API = '/preview/temp/stashes/page';
+    var HAS_TEAM_FILTER = {{ (teams is not none) | tojson }};
 
     attachDatePicker(document.getElementById('filterFromDate'));
     attachDatePicker(document.getElementById('filterToDate'));
@@ -313,6 +328,7 @@
             fromDate: document.getElementById('filterFromDate').value,
             toDate: document.getElementById('filterToDate').value,
             projectQuery: document.getElementById('filterProjectName').value.trim(),
+            teamId: HAS_TEAM_FILTER ? document.getElementById('filterTeam').value : '',
         };
     }
 
@@ -324,6 +340,7 @@
         if (filters.fromDate) params.set('from_date', filters.fromDate);
         if (filters.toDate) params.set('to_date', filters.toDate);
         if (filters.projectQuery) params.set('project_name', filters.projectQuery);
+        if (filters.teamId) params.set('team_id', filters.teamId);
 
         window.MHES.showLoading('Loading...');
         fetch(STASHES_PAGE_API + '?' + params.toString())
@@ -361,7 +378,7 @@
         countBadge.textContent = total + ' record(s)';
 
         if (rows.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">' +
+            tbody.innerHTML = '<tr><td colspan="' + (HAS_TEAM_FILTER ? 7 : 6) + '" class="text-center text-muted py-4">' +
                 'No stashes match the selected filters. Try adjusting the date range or project name, or ' +
                 '<a href="#" id="tempFilterResetLink">reset the filters</a>.</td></tr>';
             var resetLink = document.getElementById('tempFilterResetLink');
@@ -379,6 +396,7 @@
             html +=
                 '<tr>' +
                     '<td>' + esc(stash.projectName || 'Untitled stash') + '</td>' +
+                    (HAS_TEAM_FILTER ? '<td>' + esc(stash.teamName || '-') + '</td>' : '') +
                     '<td>' + esc(stash.createdBy || '-') + '</td>' +
                     '<td><small class="text-muted">' + esc(formatStashedAt(stash.stashedAt)) + '</small></td>' +
                     '<td class="text-end">' + fmt2(calcTotalHours(stash)) + 'h</td>' +
@@ -447,6 +465,7 @@
         document.getElementById('filterFromDate').value = '';
         document.getElementById('filterToDate').value = '';
         document.getElementById('filterProjectName').value = '';
+        if (HAS_TEAM_FILTER) document.getElementById('filterTeam').value = '';
         fetchPage(1);
     });
 

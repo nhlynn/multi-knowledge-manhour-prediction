@@ -32,11 +32,18 @@ logger = logging.getLogger(__name__)
 def _row_to_stash(row) -> dict[str, Any]:
     """Convert a temp_stashes SQLite row back into the legacy stash dict shape."""
     data = json.loads(row["json_data"])
+    keys = row.keys()
     return {
         "id": row["id"],
         "stashedAt": row["created_at"],
         "projectName": row["project_name"] or "",
         "createdBy": row["created_by"] or "",
+        "teamId": row["team_id"],
+        # team_name only exists on rows from TempRepository.list_page's
+        # own LEFT JOIN teams -- absent (None) from get_by_id's plain
+        # "SELECT *", which callers that don't need it (e.g. the detail
+        # page) still use.
+        "teamName": row["team_name"] if "team_name" in keys else None,
         "categories": data.get("categories", []),
         "totals": data.get("totals", {}),
     }

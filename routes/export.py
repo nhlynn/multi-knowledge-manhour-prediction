@@ -77,6 +77,32 @@ def _team_id_filter() -> int | None:
     return session.get("team_id")
 
 
+def _team_id_list_filter() -> int | None:
+    """Return the effective ``team_id`` filter for the Export History
+    LIST page specifically, honoring an Admin's optional Team dropdown
+    selection (``?team_id=``) on top of ``_team_id_filter``'s base rule.
+
+    Mirrors ``routes/preview.py``'s identical ``_team_id_list_filter``
+    for Temporary Data: a Team Manager's ``team_id`` in the query
+    string, if any, is always ignored — their filter stays locked to
+    their own team regardless of what's in the URL. Only when
+    ``_team_id_filter`` already returned None (Admin) does a
+    query-string ``team_id`` take effect, narrowing "every team" down
+    to one specific team; an absent or unparseable value leaves it at
+    "every team".
+    """
+    base = _team_id_filter()
+    if base is not None:
+        return base
+    raw = (request.args.get("team_id") or "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    return None
+
+
 def _team_export_template() -> dict:
     """Return the current session's team's export template (Phase 8).
 
@@ -292,7 +318,7 @@ def list_exports() -> str:
     page = parse_page_param(request.args.get("page"))
 
     service = _export_history_service()
-    team_filter = _team_id_filter()
+    team_filter = _team_id_list_filter()
     try:
         history, total = service.get_history_page(
             page=page,
@@ -321,10 +347,13 @@ def list_exports() -> str:
         history, total, total_pages = [], 0, 1
 
     # Admin sees exports across every team — enrich each row with the
-    # owning team's name so that's visible in the list (team_filter is
-    # None only for Admin; see _team_id_filter).
+    # owning team's name so that's visible in the list, regardless of
+    # whether they've also narrowed team_filter down to one specific
+    # team via the Team dropdown (team_filter is only None for Admin
+    # with no team chosen; role is the right check here, not that).
     team_names_by_id = {}
-    if team_filter is None and history:
+    is_admin = session.get("role") == "Admin"
+    if is_admin and history:
         from repositories.team_repository import TeamRepository
 
         team_names_by_id = {
@@ -341,7 +370,7 @@ def list_exports() -> str:
         existing_gcs_paths = list_existing_export_object_paths()
 
     for record in history:
-        if team_filter is None:
+        if is_admin:
             record["team_name"] = team_names_by_id.get(record.get("team_id"), "Unknown")
         file_path = record.get("file_path")
         if file_path and is_local_path(file_path):
@@ -365,6 +394,8 @@ def list_exports() -> str:
     range_start = (page - 1) * EXPORTS_PER_PAGE + 1 if total else 0
     range_end = min(page * EXPORTS_PER_PAGE, total)
 
+    team_id_param = (request.args.get("team_id") or "").strip() if is_admin else ""
+
     filter_args = {}
     if from_date:
         filter_args["from_date"] = from_date
@@ -372,10 +403,20 @@ def list_exports() -> str:
         filter_args["to_date"] = to_date
     if project_name:
         filter_args["project_name"] = project_name
+    if team_id_param:
+        filter_args["team_id"] = team_id_param
+
+    teams = None
+    if is_admin:
+        from repositories.team_repository import TeamRepository
+
+        teams = TeamRepository(current_app.config["MHES_DB_PATH"]).list_all()
 
     return render_template(
         "exported_files.html",
         files=history,
+        teams=teams,
+        team_id=team_id_param,
         page=page,
         total_pages=total_pages,
         total=total,

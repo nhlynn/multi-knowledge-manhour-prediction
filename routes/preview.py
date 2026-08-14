@@ -37,6 +37,31 @@ def _team_id_filter() -> int | None:
     return session.get("team_id")
 
 
+def _team_id_list_filter() -> int | None:
+    """Return the effective ``team_id`` filter for the Temporary Data
+    LIST page specifically, honoring an Admin's optional Team dropdown
+    selection (``?team_id=``) on top of ``_team_id_filter``'s base rule.
+
+    A Team Manager's ``team_id`` in the query string, if any, is always
+    ignored -- their filter stays locked to their own team regardless
+    of what's in the URL, so they can never see another team's
+    stashes by hand-editing it. Only when ``_team_id_filter`` already
+    returned None (Admin) does a query-string ``team_id`` take effect,
+    narrowing "every team" down to one specific team; an absent or
+    unparseable value leaves it at "every team".
+    """
+    base = _team_id_filter()
+    if base is not None:
+        return base
+    raw = (request.args.get("team_id") or "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    return None
+
+
 @preview_bp.route("/", methods=["GET"])
 @roles_required("Team Manager", redirect_endpoint="dashboard")
 def preview_page() -> str:
@@ -60,7 +85,12 @@ def temp_data_page() -> str:
     Returns:
         Rendered temporary data list template.
     """
-    return render_template("temp_data.html")
+    teams = None
+    if session.get("role") == "Admin":
+        from repositories.team_repository import TeamRepository
+
+        teams = TeamRepository(current_app.config["MHES_DB_PATH"]).list_all()
+    return render_template("temp_data.html", teams=teams)
 
 
 @preview_bp.route("/temp/<stash_id>", methods=["GET"])
@@ -87,14 +117,16 @@ def list_stashes_page():
     """Return one page of stashed Preview snapshots as JSON, newest first.
 
     Supports server-side pagination (``page``) combined with From Date /
-    To Date / Project Name filters, so only one page of stashes is ever
-    loaded from the database per request.
+    To Date / Project Name / Team filters, so only one page of stashes is
+    ever loaded from the database per request. The Team filter
+    (``?team_id=``) only has any effect for Admin -- see
+    ``_team_id_list_filter``.
     """
     from_date = (request.args.get("from_date") or "").strip()
     to_date = (request.args.get("to_date") or "").strip()
     project_name = (request.args.get("project_name") or "").strip()
     page = parse_page_param(request.args.get("page"))
-    team_filter = _team_id_filter()
+    team_filter = _team_id_list_filter()
 
     service = _temp_data_service()
     items, total = service.list_stashes_page(

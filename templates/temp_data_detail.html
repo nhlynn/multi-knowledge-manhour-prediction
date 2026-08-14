@@ -127,6 +127,13 @@
     var STASH_ID = {{ stash_id | tojson }};
     var STASHES_API = '/preview/temp/stashes';
     var PREVIEW_KEY = 'previewData';
+    // Admin doesn't get Discard/Restore -- oversight-only view here
+    // (see routes/preview.py: Admin can see every team's Temporary
+    // Data, but Preview itself, which Restore would send them to, is
+    // Team-Manager-only; Discard is hidden alongside it for the same
+    // reason -- Admin isn't meant to be managing a team's in-progress
+    // estimate data, just able to look at it).
+    var IS_ADMIN = {{ (current_user and current_user.role == "Admin") | tojson }};
 
     var stash = null;
 
@@ -175,6 +182,20 @@
         });
         var totals = calcTotals(categories);
 
+        // Admin sees Discard/Restore hidden for a team-owned stash (see
+        // IS_ADMIN's own comment -- Admin isn't meant to manage a
+        // team's in-progress estimate data). An orphaned stash (no
+        // team_id at all -- a pre-team-scoping legacy row, or one that
+        // otherwise never got assigned to a team) has no team owner
+        // who could ever clean it up themselves, so Admin gets Discard
+        // back for this case specifically -- pure cleanup, not
+        // managing a team's active work. Restore stays hidden for
+        // Admin either way: it merges into Preview's own session data
+        // and redirects to /preview, a page Admin can't reach at all.
+        var isOrphaned = !stash.teamId;
+        var showDiscard = !IS_ADMIN || isOrphaned;
+        var showRestore = !IS_ADMIN;
+
         var html = '';
         html += '<div class="card preview-section-card mb-4">';
         html +=
@@ -184,15 +205,20 @@
                     '<small class="text-muted">' +
                         'Stashed ' + esc(formatStashedAt(stash.stashedAt)) +
                         (stash.createdBy ? ' &middot; Created By: ' + esc(stash.createdBy) : '') +
+                        (IS_ADMIN && isOrphaned ? ' &middot; <span class="text-warning">Unassigned (no team)</span>' : '') +
                     '</small>' +
                 '</div>' +
                 '<div>' +
-                    '<button class="btn btn-outline-danger btn-sm me-2" id="discardBtn">' +
-                        '<i class="bi bi-trash me-1"></i>Discard' +
-                    '</button>' +
-                    '<button class="btn btn-success btn-sm" id="restoreBtn">' +
-                        '<i class="bi bi-arrow-return-left me-1"></i>Restore to Preview' +
-                    '</button>' +
+                    (showDiscard ?
+                        '<button class="btn btn-outline-danger btn-sm me-2" id="discardBtn">' +
+                            '<i class="bi bi-trash me-1"></i>Discard' +
+                        '</button>' : ''
+                    ) +
+                    (showRestore ?
+                        '<button class="btn btn-success btn-sm" id="restoreBtn">' +
+                            '<i class="bi bi-arrow-return-left me-1"></i>Restore to Preview' +
+                        '</button>' : ''
+                    ) +
                 '</div>' +
             '</div>';
 
@@ -284,15 +310,25 @@
         html += '</div>'; // card
 
         document.getElementById('detailRoot').innerHTML = html;
-        document.getElementById('discardBtn').addEventListener('click', onDiscard);
-        document.getElementById('restoreBtn').addEventListener('click', onRestore);
+        if (showDiscard) document.getElementById('discardBtn').addEventListener('click', onDiscard);
+        if (showRestore) document.getElementById('restoreBtn').addEventListener('click', onRestore);
     }
 
     function deleteStashOnServer(id) {
         return fetch(STASHES_API + '/' + encodeURIComponent(id), {
             method: 'DELETE',
             headers: {'X-CSRFToken': window.MHES.csrfToken()},
-        }).catch(function() {});
+        }).then(function(r) {
+            if (r.ok) return r;
+            // Surface the real failure instead of silently swallowing it
+            // (the previous version's blanket .catch(function(){}) made
+            // every failure look identical to success -- the page would
+            // redirect back to the list either way, with no indication
+            // anything went wrong, even though the row was never removed).
+            return r.json().catch(function() { return {}; }).then(function(body) {
+                throw new Error(body.error || ('Discard failed (HTTP ' + r.status + ').'));
+            });
+        });
     }
 
     function onDiscard() {
@@ -300,6 +336,9 @@
         window.MHES.showLoading('Discarding...');
         deleteStashOnServer(STASH_ID).then(function() {
             window.location.href = '{{ url_for("preview.temp_data_page") }}';
+        }).catch(function(err) {
+            window.MHES.hideLoading();
+            alert(err.message || 'Discard failed. Please try again.');
         });
     }
 
@@ -353,7 +392,13 @@
             createdBy: mergedCreatedBy || stash.createdBy || ''
         }));
 
-        deleteStashOnServer(STASH_ID).finally(function() {
+        // .catch() before .finally(): the server-side cleanup delete is
+        // best-effort here -- the actual restore (categories merged into
+        // sessionStorage above) already succeeded, so a delete failure
+        // shouldn't block the redirect or surface as an unhandled promise
+        // rejection; it just means this stash row stays behind for
+        // Discard to clean up later instead.
+        deleteStashOnServer(STASH_ID).catch(function() {}).finally(function() {
             window.location.href = '/preview';
         });
     }

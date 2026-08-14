@@ -202,19 +202,19 @@ class TempRepository(BaseRepository):
         conditions = []
         params: list[Any] = []
         if stash_type is not None:
-            conditions.append("stash_type = ?")
+            conditions.append("temp_stashes.stash_type = ?")
             params.append(stash_type)
         if team_id is not None:
-            conditions.append("team_id = ?")
+            conditions.append("temp_stashes.team_id = ?")
             params.append(team_id)
         if from_date:
-            conditions.append("substr(created_at, 1, 10) >= ?")
+            conditions.append("substr(temp_stashes.created_at, 1, 10) >= ?")
             params.append(from_date)
         if to_date:
-            conditions.append("substr(created_at, 1, 10) <= ?")
+            conditions.append("substr(temp_stashes.created_at, 1, 10) <= ?")
             params.append(to_date)
         if project_name:
-            conditions.append("LOWER(project_name) LIKE ?")
+            conditions.append("LOWER(temp_stashes.project_name) LIKE ?")
             params.append(f"%{project_name.lower()}%")
         where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -222,11 +222,19 @@ class TempRepository(BaseRepository):
             f"SELECT COUNT(*) AS c FROM temp_stashes {where_clause}", params
         )["c"]
 
+        # LEFT JOIN teams for team_name -- Admin sees every team's
+        # stashes (team_id=None, see this method's own docstring), so
+        # the list needs to show which team each row belongs to.
+        # "temp_stashes.*" (not "*") avoids both tables' "id" column
+        # colliding into one ambiguous name.
         offset = max(page - 1, 0) * per_page
         rows = self._fetch_all(
             f"""
-            SELECT * FROM temp_stashes {where_clause}
-            ORDER BY created_at DESC
+            SELECT temp_stashes.*, teams.name AS team_name
+            FROM temp_stashes
+            LEFT JOIN teams ON temp_stashes.team_id = teams.id
+            {where_clause}
+            ORDER BY temp_stashes.created_at DESC
             LIMIT ? OFFSET ?
             """,
             [*params, per_page, offset],
