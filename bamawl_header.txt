@@ -1,8 +1,0 @@
-row1: [None, None, None, None, '開発の', '開発の', '要件定義の', '開発の', '業務フローの', '開発の', 'ER図の', '開発の', 'DFDの', 'ER図(の', 'DB設計の', '開発の', '基本設計書の', '設計書の', '単体テスト仕様書の', '開発の', '設計書の', '結合テスト仕様書の', '開発の', '開発の', '開発の', '開発の', '開発の', '開発～総合の', '開発～総合の', None]
-
-row2: [None, None, None, None, 0.07, 0.15, 0.05, 0.04, 0.2, 0.03, 0.02, 0, 0, 0.2, 0.2, 0.4, 0.15, 0.7, 0.15, 0.4, 0.35, 0.25, 0.4, 0.25, 0, 0.05, 0.05, 0.05, 0.15, None]
-
-row3: [None, None, None, None, None, '要件定義\nRequirement definition', None, '基本全体設計\nBasic overall design', None, None, None, None, None, None, None, '基本設計\nbasic design', None, '単体テスト\nunit test\n \n', None, None, '結合テスト\nCombined test ', None, None, '総合テスト\nComprehensive test', None, None, None, None, None, None]
-
-row4: ['ID', 'Function', 'Status', '\nDevelopment man-hours (h)\n', '\nCode review (h)', 'Prototype(h)', 'PrototypeReview(h)', '\n\nBusiness flow(h)', '\nBusiness flow Review\n(h)', 'ERD(h)', 'ERD Review(h)', 'DFD(h)', 'DFD Review(h)', '\nDB Design(h)', '\nDB Design Review(h)', 'Screen/Form/Function (h)', 'Review(h)', '\nTest Specification(h)', 'Review(h)', '\nImplementation\n(h)', 'テスト仕様書(h)\nTest Specification', 'レビュー(h)', '実施(h)\nImplementation', '実施(h)\nImplementation', 'テストデータ作成(h)\nTest Data Creation', 'マニュアル作成(h)\nUser Manual', '付帯作業(h)\nAccidental Work', 'リスク(h)', '管理工数(h)\nManagement Manhours', 'Total(h)']
-

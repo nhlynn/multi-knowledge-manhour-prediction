@@ -1,5 +1,0 @@
-Sheets: ['機能一覧', 'Milestone', '工数詳細', '工数・費用']
---- 機能一覧 (dims=A1:F8) ---
---- Milestone (dims=A2:W8) ---
---- 工数詳細 (dims=A1:S22) ---
---- 工数・費用 (dims=A1:O19) ---

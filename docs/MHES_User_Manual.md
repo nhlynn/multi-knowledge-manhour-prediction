@@ -158,7 +158,6 @@ This is because MHES is built on Bootstrap 5.3.3 and the Quill 2.0.3 rich-text e
 | AI / search | sentence-transformers 3.4.1, FAISS (CPU-only build — no GPU required) |
 | Scheduling | APScheduler 3.11.3 (in-process background jobs) |
 | Cloud storage | google-cloud-storage 3.13.0 (for storing exported Excel files) |
-| Ollama (optional) | `qwen2.5:3b` model — installable but not yet connected to the chatbot; not required for current functionality |
 | GPU | Not required — the AI search feature uses the CPU-only FAISS build |
 
 **Client-side:** A supported web browser (see above). No software installation is required on the user's device.
@@ -1073,7 +1072,7 @@ A: Not directly. The Export Detail screen is read-only. To make changes, go back
 - There is no self-service password reset or account creation; an administrator must create accounts and cannot yet do so through the UI (see Unsupported Operations below).
 - The Manage Users and Manage Teams screens are read-only in this version — there is no in-app way to create, edit, or delete a user or team.
 - A team's custom Excel import column mapping (if used) and export column template (if used) must be configured directly by a developer/administrator; there is no in-app screen for setting these up yet.
-- The underlying AI language model (Ollama) integration is not yet active; the AI Chatbot currently uses structured semantic search only.
+- The underlying AI language model integration is not yet active; the AI Chatbot currently uses structured semantic search only.
 - Temporary Data stashes older than the configured retention period are automatically and permanently deleted; there is no way to recover a stash once it has been purged.
 - Category names are not guaranteed to be unique across different Knowledge Base files within the same team.
 

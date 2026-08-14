@@ -11,7 +11,6 @@ openpyxl==3.1.5
 # AI / ML
 sentence-transformers==3.4.1
 faiss-cpu==1.9.0.post1
-ollama==0.4.8
 
 # Logging
 colorlog==6.9.0

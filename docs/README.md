@@ -158,12 +158,10 @@ yet scoped per team — a known limitation (see Future Improvements).
 |---|---|---|
 | Embedding model | sentence-transformers (`all-MiniLM-L6-v2`) | 3.4.1 |
 | Vector index | FAISS (`IndexFlatL2`) | 1.9.0.post1 |
-| LLM client | Ollama (`qwen2.5:3b`) | 0.4.8 |
 | Numerical compute | NumPy | (transitive dep) |
 
-> **Note**: The Ollama LLM integration is included as a dependency but is not yet connected
-> to the chatbot endpoint. The current chatbot uses structured semantic search only.
-> LLM-powered response generation is a planned enhancement.
+> **Note**: The chatbot uses structured semantic search only. LLM-powered
+> response generation is a planned enhancement.
 
 ### Storage
 
@@ -209,7 +207,7 @@ Open `http://localhost:4000` in your browser and log in (see "Authentication & T
 README for the default Admin account on a fresh install).
 
 See the root [README.md](../README.md) for full installation and running instructions
-(prerequisites, Ollama setup, Google Cloud Storage setup, dev/production server commands,
+(prerequisites, Google Cloud Storage setup, dev/production server commands,
 default-admin login).
 
 ---
@@ -228,7 +226,7 @@ default-admin login).
 ## Future Improvements
 
 ### AI Enhancements
-- **Connect Ollama LLM**: Wire the already-installed `qwen2.5:3b` model to generate natural
+- **LLM-powered responses**: Integrate a language model to generate natural
   language explanations alongside search results
 - **Conversational memory**: Multi-turn chat context so follow-up questions refine previous results
 - **Approximate vector search**: Replace `IndexFlatL2` with FAISS `IVFFlat` or HNSW for faster

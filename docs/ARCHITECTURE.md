@@ -196,8 +196,7 @@ pattern, plus an in-process background scheduler:
 - **`config.py`** — `Config` base class with `DevelopmentConfig`,
   `ProductionConfig`, `TestingConfig`. Defines folder paths (including
   `TEMP_DATA_FOLDER`), upload limits (`.xlsx` only, 10 MB max), embedding
-  model name (`all-MiniLM-L6-v2`), Ollama settings (`OLLAMA_MODEL`,
-  `OLLAMA_BASE_URL`), and temp-data cleanup settings
+  model name (`all-MiniLM-L6-v2`), and temp-data cleanup settings
   (`TEMP_DATA_RETENTION_DAYS`, `TEMP_DATA_CLEANUP_TIMES`,
   `TEMP_DATA_TIMEZONE`).
 - **`routes/`** — Thin Flask Blueprints; delegate all logic to `services/`
@@ -1072,8 +1071,7 @@ now supports either mapping shape.
 ## 6. AI Chatbot Flow
 
 The chatbot performs retrieval-based semantic search (no generative LLM
-call is currently wired in, despite `OLLAMA_MODEL`/`OLLAMA_BASE_URL` being
-present in `config.py`).
+call is currently wired in).
 
 **Indexing (on upload/re-embed), via `EmbeddingService.process_excel_file`:**
 1. `excel_parser.excel_to_nested_json()` converts the Excel file into a

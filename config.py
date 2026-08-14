@@ -72,8 +72,6 @@ class Config:
 
     # AI settings
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
-    OLLAMA_MODEL: str = "qwen2.5:3b" #"llama3.1:latest" #"qwen2.5:3b"
-    OLLAMA_BASE_URL: str = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
     # Google Cloud Storage (export file storage — see services/gcs_service.py)
     # GOOGLE_APPLICATION_CREDENTIALS is intentionally not read here: the
