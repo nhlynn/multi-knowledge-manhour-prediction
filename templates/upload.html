@@ -27,13 +27,42 @@
         <h2><i class="bi bi-cloud-upload me-2"></i>Upload Knowledge Files</h2>
         <p class="text-muted">Upload one or multiple Excel files into the knowledge base. Embeddings are generated automatically.</p>
     </div>
+    {% if not no_team_selected %}
     <div class="col-auto">
-        <a href="{{ url_for('upload.download_template') }}" class="btn btn-outline-secondary">
+        <a href="{{ url_for('upload.download_template', team_id=selected_team_id) if teams is not none else url_for('upload.download_template') }}" class="btn btn-outline-secondary">
             <i class="bi bi-download me-1"></i>Download Template
         </a>
     </div>
+    {% endif %}
 </div>
 
+{% if teams is not none %}
+<div class="row mb-3">
+    <div class="col-12 col-md-4">
+        <label class="form-label" for="teamSelect">Team</label>
+        <select id="teamSelect" class="form-select" onchange="if (this.value) { window.location.href = '{{ url_for('upload.upload_page') }}?team_id=' + this.value; }">
+            <option value="" {% if not selected_team_id %}selected{% endif %} disabled>Select a team...</option>
+            {% for team in teams %}
+            <option value="{{ team.id }}" {% if selected_team_id == team.id %}selected{% endif %}>{{ team.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</div>
+{% endif %}
+
+{% if no_team_selected %}
+<div class="row mb-4">
+    <div class="col">
+        <div class="card">
+            <div class="card-body text-center py-4">
+                <i class="bi bi-diagram-3 text-muted" style="font-size:1.5rem;"></i>
+                <p class="mt-2 mb-0 fw-medium" style="color:#475569;">Select a team above to upload files or download its template.</p>
+                <p class="text-muted mb-0" style="font-size:0.85rem;">Every team's knowledge files are listed below in the meantime.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% else %}
 <div class="row">
     <!-- Upload Form -->
     <div class="col-md-8">
@@ -42,6 +71,7 @@
             <div class="card-body">
                 <form id="uploadForm" method="POST" enctype="multipart/form-data" action="{{ url_for('upload.upload_page') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="team_id" value="{{ selected_team_id or '' }}">
                     <div class="mb-3">
                         <label class="form-label">Select Excel Files (.xlsx)</label>
                         <!-- Hidden real input (no required — validation handled by JS) -->
@@ -65,7 +95,7 @@
                             <div id="templateValidationMessage" class="flex-grow-1"></div>
                         </div>
                         <div class="mt-2">
-                            <a href="{{ url_for('upload.download_template') }}" class="btn btn-sm btn-outline-danger">
+                            <a href="{{ url_for('upload.download_template', team_id=selected_team_id) if teams is not none else url_for('upload.download_template') }}" class="btn btn-sm btn-outline-danger">
                                 <i class="bi bi-download me-1"></i>Download Latest Template
                             </a>
                             <button type="button" class="btn btn-sm btn-outline-secondary ms-1" id="dismissTemplateAlert">
@@ -105,8 +135,11 @@
         </div>
     </div>
 </div>
+{% endif %}
 
-<!-- Imported Files List -->
+<!-- Imported Files List -- shown either way; in the aggregate
+     "no team selected" view (Admin only) this spans every team, with
+     its own extra Team column so each row's owner is clear. -->
 <div class="row mt-4">
     <div class="col">
         <div class="card">
@@ -123,6 +156,9 @@
                         <thead class="table-dark">
                             <tr>
                                 <th>File Name</th>
+                                {% if no_team_selected %}
+                                <th>Team</th>
+                                {% endif %}
                                 <th>File Size</th>
                                 <th>Upload Date</th>
                                 <th>Categories</th>
@@ -137,6 +173,9 @@
                                     <i class="bi bi-file-earmark-spreadsheet text-success me-1"></i>
                                     {{ f.filename }}
                                 </td>
+                                {% if no_team_selected %}
+                                <td>{{ f.team_name or '-' }}</td>
+                                {% endif %}
                                 <td>{{ f.size_kb }} KB</td>
                                 <td>
                                     <small class="text-muted">{{ f.uploaded_at[:19] | replace('T', ' ') }}</small>
@@ -153,6 +192,7 @@
                                     {% if not f.has_embeddings %}
                                     <form method="POST" action="{{ url_for('upload.reembed_file', filename=f.filename) }}" class="d-inline reembed-form">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="team_id" value="{{ f.team_id or '' }}">
                                         <button type="submit" class="btn btn-sm btn-outline-primary" title="Generate embeddings">
                                             <i class="bi bi-arrow-repeat"></i>
                                         </button>
@@ -161,6 +201,7 @@
                                     <form method="POST" action="{{ url_for('upload.delete_file', filename=f.filename) }}" class="d-inline delete-form"
                                           onsubmit="return confirm('Delete {{ f.filename }}? This cannot be undone.');">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="team_id" value="{{ f.team_id or '' }}">
                                         <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
                                             <i class="bi bi-trash"></i>
                                         </button>
@@ -179,6 +220,7 @@
     </div>
 </div>
 
+{% if not no_team_selected %}
 <!-- Duplicate Confirmation Modal -->
 <div class="modal fade" id="duplicateModal" tabindex="-1">
     <div class="modal-dialog">
@@ -204,9 +246,26 @@
         </div>
     </div>
 </div>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
+<script>
+// Delete/Re-embed loading-overlay wiring -- always active, in both
+// the single-team and aggregate ("no team selected") views, since
+// both render these two forms per row.
+document.querySelectorAll('.reembed-form').forEach(function(f) {
+    f.addEventListener('submit', function() {
+        window.MHES.showLoading('Generating embeddings...');
+    });
+});
+document.querySelectorAll('.delete-form').forEach(function(f) {
+    f.addEventListener('submit', function() {
+        window.MHES.showLoading('Deleting file...');
+    });
+});
+</script>
+{% if not no_team_selected %}
 <script>
 (function() {
     var form = document.getElementById('uploadForm');
@@ -218,6 +277,17 @@
     var fileListEl = document.getElementById('fileList');
     var fileCountEl = document.getElementById('fileCount');
     var modal = new bootstrap.Modal(document.getElementById('duplicateModal'));
+    // Admin's selected team (empty string for a non-Admin role, whose
+    // team is always implicit server-side from their own session --
+    // see routes/upload.py's _effective_team_id). Appended to every
+    // fetch URL below so the server resolves the same team for
+    // check-duplicates/validate-template as the page itself loaded.
+    var TEAM_ID = {{ (selected_team_id or '') | tojson }};
+
+    function withTeamId(url) {
+        if (!TEAM_ID) return url;
+        return url + (url.indexOf('?') === -1 ? '?' : '&') + 'team_id=' + encodeURIComponent(TEAM_ID);
+    }
 
     // Managed file list using unique IDs (not array indices)
     var selectedFiles = [];  // [{id, file}]
@@ -274,7 +344,7 @@
         var formData = new FormData();
         formData.append('files', file);
 
-        fetch('{{ url_for("upload.validate_template") }}', {
+        fetch(withTeamId('{{ url_for("upload.validate_template") }}'), {
             method: 'POST',
             headers: {'X-CSRFToken': window.MHES.csrfToken()},
             body: formData
@@ -394,7 +464,7 @@
 
         var filenames = selectedFiles.map(function(s) { return s.file.name; });
 
-        fetch('{{ url_for("upload.check_duplicates") }}', {
+        fetch(withTeamId('{{ url_for("upload.check_duplicates") }}'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-CSRFToken': window.MHES.csrfToken()},
             body: JSON.stringify({filenames: filenames})
@@ -434,20 +504,10 @@
         doSubmit();
     });
 
-    // Re-embed and delete forms navigate away on submit (server redirects
-    // back to this page), so use the same global loading overlay as
-    // other pages instead of a per-button spinner.
-    document.querySelectorAll('.reembed-form').forEach(function(f) {
-        f.addEventListener('submit', function() {
-            window.MHES.showLoading('Generating embeddings...');
-        });
-    });
-
-    document.querySelectorAll('.delete-form').forEach(function(f) {
-        f.addEventListener('submit', function() {
-            window.MHES.showLoading('Deleting file...');
-        });
-    });
+    // Re-embed/delete forms' loading-overlay wiring lives in the
+    // always-active script above, outside this upload-only block, so
+    // it also applies in the aggregate "no team selected" view, which
+    // has these same two forms per row but never renders this script.
 
     function showWarning(message) {
         var alertDiv = document.createElement('div');
@@ -499,4 +559,5 @@
     }
 })();
 </script>
+{% endif %}
 {% endblock %}

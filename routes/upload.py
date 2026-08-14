@@ -40,22 +40,52 @@ upload_bp.before_request(require_roles("Admin", "Team Manager"))
 # Service helpers
 # ------------------------------------------------------------------
 
-def _team_folders() -> tuple[str, str, str]:
-    """Resolve (kb_folder, embeddings_folder, team_slug) for the current session's team."""
+def _effective_team_id() -> int | None:
+    """Return the team_id whose knowledge base this request operates on.
+
+    Team Manager: always locked to their own team (``session["team_id"]``)
+    — never overridable by anything in the request, so a Team Manager
+    can never touch another team's knowledge base by adding a team_id
+    to the URL or form.
+
+    Admin: has no "home" team for knowledge-base purposes, so must
+    explicitly choose one via a ``team_id`` value in the request --
+    checked via ``request.values`` (covers both a query string
+    ``?team_id=`` on a GET/fetch URL and a form field on a POST), so
+    every route here (page load, template download, duplicate check,
+    template pre-validation, upload, delete, re-embed) reads the same
+    selection the same way regardless of how each specific request
+    happens to carry it. Returns None if Admin hasn't chosen a team
+    yet -- every route below checks for that and prompts/redirects
+    instead of touching a team-scoped folder or service with no team.
+    """
+    if session.get("role") != "Admin":
+        return session.get("team_id")
+    raw = (request.values.get("team_id") or "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    return None
+
+
+def _team_folders(team_id: int) -> tuple[str, str, str]:
+    """Resolve (kb_folder, embeddings_folder, team_slug) for ``team_id``."""
     return team_folders_for_team_id(
         current_app.config["TEAMS_FOLDER"],
         current_app.config["MHES_DB_PATH"],
-        session["team_id"],
+        team_id,
     )
 
 
-def _excel_service() -> ExcelService:
-    kb_folder, _, _ = _team_folders()
+def _excel_service(team_id: int) -> ExcelService:
+    kb_folder, _, _ = _team_folders(team_id)
     return ExcelService(kb_folder=kb_folder)
 
 
-def _embedding_service() -> EmbeddingService:
-    _, embeddings_folder, team_slug = _team_folders()
+def _embedding_service(team_id: int) -> EmbeddingService:
+    _, embeddings_folder, team_slug = _team_folders(team_id)
     return EmbeddingService(
         model_name=current_app.config["EMBEDDING_MODEL"],
         embeddings_folder=embeddings_folder,
@@ -63,40 +93,73 @@ def _embedding_service() -> EmbeddingService:
     )
 
 
-def _team_column_mapping() -> dict[str, str] | None:
-    """Return the current session's team's configured Excel column
-    mapping (Phase 7), or None if that team has no import configuration
-    — in which case ``excel_parser`` falls back to generic keyword
-    matching, unchanged from before Phase 7.
+def _team_column_mapping(team_id: int) -> dict[str, str] | None:
+    """Return ``team_id``'s configured Excel column mapping (Phase 7),
+    or None if that team has no import configuration — in which case
+    ``excel_parser`` falls back to generic keyword matching, unchanged
+    from before Phase 7.
     """
     from repositories.team_import_config_repository import TeamImportConfigRepository
 
     repo = TeamImportConfigRepository(current_app.config["MHES_DB_PATH"])
-    config = repo.get_by_team_id(session["team_id"])
+    config = repo.get_by_team_id(team_id)
     return config["column_mapping"] if config else None
 
 
-def _current_team_name() -> str | None:
-    """Return the current session's team's name, or None if it can't be resolved."""
+def _current_team_name(team_id: int) -> str | None:
+    """Return ``team_id``'s team name, or None if it can't be resolved."""
     from repositories.team_repository import TeamRepository
 
-    team = TeamRepository(current_app.config["MHES_DB_PATH"]).get_by_id(session["team_id"])
+    team = TeamRepository(current_app.config["MHES_DB_PATH"]).get_by_id(team_id)
     return team["name"] if team is not None else None
 
 
-def _current_team_template_spec():
-    """Return the current session's team's registered
-    ``TeamTemplateSpec`` (see ``services/team_template_registry.py``),
-    or None if that team has no strictly-validated template of its own
-    -- in which case its upload keeps using the existing generic,
-    lenient, keyword-based column matching, unaffected by any of this.
+def _current_team_template_spec(team_id: int):
+    """Return ``team_id``'s registered ``TeamTemplateSpec`` (see
+    ``services/team_template_registry.py``), or None if that team has
+    no strictly-validated template of its own -- in which case its
+    upload keeps using the existing generic, lenient, keyword-based
+    column matching, unaffected by any of this.
 
-    This is the single point where "detect the current user's team,
-    then look up the template assigned to it" happens — every other
+    This is the single point where "resolve team_id to a name, then
+    look up the template assigned to it" happens — every other
     function here just uses whatever this returns.
     """
-    team_name = _current_team_name()
+    team_name = _current_team_name(team_id)
     return get_team_template_spec(team_name) if team_name else None
+
+
+def _all_teams_kb_files(teams: list) -> list[dict]:
+    """Return every team's knowledge files combined into one list, each
+    tagged with its own ``team_id``/``team_name`` -- for Admin's
+    upload page before a specific team is chosen (see ``upload_page``).
+
+    One ``ExcelService``/``EmbeddingService`` pair per team, same as a
+    normal single-team page load, just looped -- a team whose KB
+    folder fails to read (e.g. permissions, corrupt index) is skipped
+    with a warning rather than failing the whole aggregate listing.
+    Sorted newest-first by ``uploaded_at`` across all teams combined,
+    matching a single team's own list ordering.
+    """
+    combined: list[dict] = []
+    for team in teams:
+        try:
+            svc = _excel_service(team["id"])
+            emb = _embedding_service(team["id"])
+            files = svc.list_knowledge_files()
+            emb.annotate_files_with_embedding_status(files)
+        except Exception:
+            logger.exception(
+                "Failed to list knowledge files for team_id=%s (%s) in the "
+                "all-teams aggregate view.", team["id"], team.get("name"),
+            )
+            continue
+        for f in files:
+            f["team_id"] = team["id"]
+            f["team_name"] = team["name"]
+        combined.extend(files)
+    combined.sort(key=lambda f: f.get("uploaded_at") or "", reverse=True)
+    return combined
 
 
 def _invalid_template_message(spec) -> str:
@@ -131,17 +194,46 @@ def _team_sample_template_path(spec) -> str | None:
 
 @upload_bp.route("/", methods=["GET"])
 def upload_page() -> str:
-    """Render the upload page with the list of imported files."""
-    svc = _excel_service()
-    emb = _embedding_service()
+    """Render the upload page with the list of imported files.
+
+    Admin must choose a team via the page's own Team dropdown before
+    uploading, downloading a template, or deleting/re-embedding a file
+    -- see ``_effective_team_id``. Without one selected, the page still
+    shows every team's knowledge files together (each row tagged with
+    its own team, via ``team_id``/``team_name`` -- see
+    ``_all_teams_kb_files``), just with the Upload form and Download
+    Template button hidden, since adding a NEW file still needs a
+    specific team's folder to save it into.
+    """
+    is_admin = session.get("role") == "Admin"
+    team_id = _effective_team_id()
+
+    teams = None
+    if is_admin:
+        from repositories.team_repository import TeamRepository
+
+        teams = TeamRepository(current_app.config["MHES_DB_PATH"]).list_all()
+
+    if is_admin and team_id is None:
+        kb_files = _all_teams_kb_files(teams)
+        return render_template(
+            "upload.html", kb_files=kb_files, teams=teams, selected_team_id=None, no_team_selected=True,
+        )
+
+    svc = _excel_service(team_id)
+    emb = _embedding_service(team_id)
     kb_files = svc.list_knowledge_files()
     emb.annotate_files_with_embedding_status(kb_files)
-    return render_template("upload.html", kb_files=kb_files)
+    for f in kb_files:
+        f["team_id"] = team_id
+    return render_template(
+        "upload.html", kb_files=kb_files, teams=teams, selected_team_id=team_id, no_team_selected=False,
+    )
 
 
 @upload_bp.route("/template", methods=["GET"])
 def download_template():
-    """Download the current session's team's knowledge-file template.
+    """Download ``team_id``'s knowledge-file template.
 
     A team with its own registered ``TeamTemplateSpec`` (see
     ``services/team_template_registry.py``) that also has a sample
@@ -152,7 +244,12 @@ def download_template():
     server-side. Every other team keeps the existing generic behavior
     below, unaffected.
     """
-    dedicated_path = _team_sample_template_path(_current_team_template_spec())
+    team_id = _effective_team_id()
+    if team_id is None:
+        flash("Please select a team before downloading a template.", "warning")
+        return redirect(url_for("upload.upload_page"))
+
+    dedicated_path = _team_sample_template_path(_current_team_template_spec(team_id))
     if dedicated_path:
         return send_file(
             dedicated_path, as_attachment=True, download_name=os.path.basename(dedicated_path),
@@ -174,25 +271,31 @@ def download_template():
 def check_duplicates() -> tuple:
     """Check which of the selected filenames already exist in kb_knowledge.
 
-    Expects a JSON body: ``{"filenames": ["a.xlsx", "b.xlsx"]}``.
+    Expects a JSON body: ``{"filenames": ["a.xlsx", "b.xlsx"]}``, and
+    (for Admin) a ``?team_id=`` query string value -- see
+    ``_effective_team_id``.
 
     Returns:
         JSON with ``{"duplicates": ["a.xlsx"]}`` (only the ones that exist).
     """
+    team_id = _effective_team_id()
+    if team_id is None:
+        return jsonify({"error": "No team selected."}), 400
+
     data = request.get_json(silent=True) or {}
     filenames = data.get("filenames", [])
 
     if not isinstance(filenames, list) or not all(isinstance(n, str) for n in filenames):
         return jsonify({"error": "'filenames' must be a list of strings."}), 400
 
-    duplicates = _excel_service().find_existing_filenames(filenames)
+    duplicates = _excel_service(team_id).find_existing_filenames(filenames)
     return jsonify({"duplicates": duplicates})
 
 
 @upload_bp.route("/validate-template", methods=["POST"])
 def validate_template():
-    """Structurally validate one file against the current session's
-    team's registered template, without saving or embedding anything.
+    """Structurally validate one file against ``team_id``'s registered
+    template, without saving or embedding anything.
 
     Called client-side right after a file is selected (before the user
     even clicks Upload), so an invalid file can be flagged immediately
@@ -206,14 +309,19 @@ def validate_template():
     Bamawl today) always gets ``{"valid": true}`` immediately — this
     endpoint has no effect on their upload flow.
 
-    Expects a single-file multipart form body: ``files``.
+    Expects a single-file multipart form body: ``files``, plus (for
+    Admin) a ``team_id`` field -- see ``_effective_team_id``.
 
     Returns:
         JSON ``{"valid": true}``, or ``{"valid": false, "message": ...,
         "reason": ...}`` with the same user-facing wording
         ``upload_files``'s rejection flash uses.
     """
-    spec = _current_team_template_spec()
+    team_id = _effective_team_id()
+    if team_id is None:
+        return jsonify({"valid": True})
+
+    spec = _current_team_template_spec(team_id)
     if spec is None:
         return jsonify({"valid": True})
 
@@ -240,17 +348,23 @@ def upload_files() -> str:
     Form fields:
         ``files``: One or more file inputs.
         ``duplicate_action``: ``"rename"`` (default) or ``"overwrite"``.
+        ``team_id``: Required for Admin -- see ``_effective_team_id``.
 
     After each successful save the embedding service is called automatically.
     """
+    team_id = _effective_team_id()
+    if team_id is None:
+        flash("Please select a team before uploading.", "warning")
+        return redirect(url_for("upload.upload_page"))
+
     files = request.files.getlist("files")
     duplicate_action = request.form.get("duplicate_action", "rename")
 
     if not files or all(f.filename in (None, "") for f in files):
         flash("No files selected.", "warning")
-        return redirect(url_for("upload.upload_page"))
+        return redirect(url_for("upload.upload_page", team_id=team_id))
 
-    column_mapping = _team_column_mapping()
+    column_mapping = _team_column_mapping(team_id)
 
     # A team with its own registered TeamTemplateSpec (see
     # services/team_template_registry.py) accepts only its own official
@@ -258,7 +372,7 @@ def upload_files() -> str:
     # file is rejected outright with a clear message instead of being
     # saved and only failing embedding later with a generic error.
     # Every team without a registered spec is completely unaffected.
-    spec = _current_team_template_spec()
+    spec = _current_team_template_spec(team_id)
     if spec:
         accepted_files = []
         for file in files:
@@ -278,20 +392,20 @@ def upload_files() -> str:
                 )
         files = accepted_files
         if not files:
-            return redirect(url_for("upload.upload_page"))
+            return redirect(url_for("upload.upload_page", team_id=team_id))
 
     result = upload_and_embed_files(
         files,
         duplicate_action=duplicate_action,
-        excel_service=_excel_service(),
-        embedding_service=_embedding_service(),
+        excel_service=_excel_service(team_id),
+        embedding_service=_embedding_service(team_id),
         column_mapping=column_mapping,
-        team_name=_current_team_name(),
+        team_name=_current_team_name(team_id),
     )
     for message in result.messages:
         flash(message.text, message.category)
 
-    return redirect(url_for("upload.upload_page"))
+    return redirect(url_for("upload.upload_page", team_id=team_id))
 
 
 @upload_bp.route("/delete/<filename>", methods=["POST"])
@@ -300,14 +414,22 @@ def delete_file(filename: str) -> str:
 
     Args:
         filename: Name of the file to remove.
+
+    Form fields:
+        ``team_id``: Required for Admin -- see ``_effective_team_id``.
     """
+    team_id = _effective_team_id()
+    if team_id is None:
+        flash("Please select a team first.", "warning")
+        return redirect(url_for("upload.upload_page"))
+
     if not ExcelService.is_safe_filename(filename):
         logger.warning("Rejected unsafe filename for delete: %r", filename)
         flash(f"File not found: {filename}", "warning")
-        return redirect(url_for("upload.upload_page"))
+        return redirect(url_for("upload.upload_page", team_id=team_id))
 
-    svc = _excel_service()
-    emb = _embedding_service()
+    svc = _excel_service(team_id)
+    emb = _embedding_service(team_id)
 
     try:
         emb.delete_index(filename)
@@ -319,7 +441,7 @@ def delete_file(filename: str) -> str:
         logger.error("Delete failed for '%s': %s", filename, e)
         flash(f"Delete failed: {e}", "danger")
 
-    return redirect(url_for("upload.upload_page"))
+    return redirect(url_for("upload.upload_page", team_id=team_id))
 
 
 @upload_bp.route("/reembed/<filename>", methods=["POST"])
@@ -328,29 +450,37 @@ def reembed_file(filename: str) -> str:
 
     Args:
         filename: Name of the Excel file in kb_knowledge.
+
+    Form fields:
+        ``team_id``: Required for Admin -- see ``_effective_team_id``.
     """
+    team_id = _effective_team_id()
+    if team_id is None:
+        flash("Please select a team first.", "warning")
+        return redirect(url_for("upload.upload_page"))
+
     if not ExcelService.is_safe_filename(filename):
         logger.warning("Rejected unsafe filename for re-embed: %r", filename)
         flash(f"File not found: {filename}", "warning")
-        return redirect(url_for("upload.upload_page"))
+        return redirect(url_for("upload.upload_page", team_id=team_id))
 
-    emb = _embedding_service()
-    svc = _excel_service()
+    emb = _embedding_service(team_id)
+    svc = _excel_service(team_id)
     kb_path = svc.get_kb_path(filename)
-    column_mapping = _team_column_mapping()
+    column_mapping = _team_column_mapping(team_id)
 
-    spec = _current_team_template_spec()
+    spec = _current_team_template_spec(team_id)
     if spec:
         try:
             validate_team_template(kb_path, spec)
         except TeamTemplateError as e:
             logger.warning("Rejected re-embed of '%s' for %s: %s", filename, spec.team_name, e)
             flash(_team_template_error_flash_message(spec, e), "danger")
-            return redirect(url_for("upload.upload_page"))
+            return redirect(url_for("upload.upload_page", team_id=team_id))
 
     try:
         result = emb.process_excel_file(
-            kb_path, column_mapping=column_mapping, team_name=_current_team_name(),
+            kb_path, column_mapping=column_mapping, team_name=_current_team_name(team_id),
         )
         flash(
             f"Embeddings regenerated for '{filename}': "
@@ -361,4 +491,4 @@ def reembed_file(filename: str) -> str:
         logger.error("Re-embedding failed for '%s': %s", filename, e)
         flash(f"Re-embedding failed: {e}", "danger")
 
-    return redirect(url_for("upload.upload_page"))
+    return redirect(url_for("upload.upload_page", team_id=team_id))
