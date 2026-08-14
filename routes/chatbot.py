@@ -12,9 +12,10 @@ from utils.team_storage import team_folders_for_team_id
 
 chatbot_bp = Blueprint("chatbot", __name__)
 # Team Manager only -- Admin manages teams/config rather than doing
-# estimation work; see app.py's own "/" route (the chatbot PAGE) for
-# the matching gate, and its comment for why redirect_endpoint points
-# at /dashboard rather than the default "index".
+# estimation work, and gets the Dashboard directly at "/" instead (see
+# app.py's own "/" route). redirect_endpoint points a blocked Admin at
+# /dashboard rather than the default "index" -- "/" itself isn't
+# blocked (it branches by role), but /chatbot/* genuinely is.
 chatbot_bp.before_request(require_roles("Team Manager", redirect_endpoint="dashboard"))
 
 

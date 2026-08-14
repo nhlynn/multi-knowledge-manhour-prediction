@@ -1,6 +1,80 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 
+{% block extra_css %}
+<style>
+    /* Compact stat chips -- small, content-hugging cards instead of
+       tall Bootstrap .card grid columns stretched to fill a whole
+       row (which looked like empty oversized boxes with only two
+       stats to show). Responsive: stacked full-width on narrow
+       screens, one row of proportionally-growing chips on wider ones
+       (rather than fixed-width islands leaving a large empty gap). */
+    .stat-chip-row {
+        display: flex;
+        flex-direction: column;
+        gap: 0.875rem;
+    }
+    .stat-chip {
+        display: flex;
+        align-items: center;
+        gap: 0.875rem;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        padding: 0.875rem 1.25rem;
+    }
+    @media (min-width: 576px) {
+        .stat-chip-row { flex-direction: row; }
+        .stat-chip { flex: 1 1 0; min-width: 0; max-width: 320px; }
+    }
+    .stat-chip-icon {
+        width: 42px;
+        height: 42px;
+        min-width: 42px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+    }
+    .stat-chip-icon-blue { background: rgba(59,130,246,0.1); color: #3b82f6; }
+    .stat-chip-icon-green { background: rgba(16,185,129,0.1); color: #10b981; }
+    .stat-chip-icon-purple { background: rgba(99,102,241,0.1); color: #6366f1; }
+    .stat-chip-value { font-size: 1.5rem; font-weight: 700; color: var(--text-primary); line-height: 1.1; }
+    .stat-chip-label { font-size: 0.78rem; color: var(--text-secondary); margin-top: 2px; }
+
+    /* Quick Actions as a chip alongside the stat chips -- same
+       icon-left / text-right structure as the other chips (icon,
+       then a label line with the buttons directly below it), instead
+       of a separate icon+label row stacked above a separate button
+       row, which made this chip taller than the other two. */
+    .stat-chip-actions-buttons { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.375rem; }
+
+    /* System Status -- its own compact panel, full width, above the chips. */
+    .compact-panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+    }
+    .compact-panel-header {
+        padding: 0.625rem 1.125rem;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        border-bottom: 1px solid var(--border-light);
+    }
+    .compact-panel-body { padding: 0.875rem 1.125rem; }
+    .status-list { display: flex; flex-wrap: wrap; gap: 0.375rem 1.25rem; margin: 0; padding: 0; list-style: none; }
+    .status-list li { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; color: var(--text-primary); }
+    .status-dot { width: 7px; height: 7px; min-width: 7px; border-radius: 50%; }
+    .status-dot-on { background: #10b981; }
+    .status-dot-off { background: var(--text-tertiary); }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="row mb-4">
     <div class="col">
@@ -9,74 +83,49 @@
     </div>
 </div>
 
-<!-- Summary Cards -->
-<div class="row g-4 mb-4">
-    <div class="col-md-3">
-        <div class="card border-primary h-100">
-            <div class="card-body text-center">
-                <i class="bi bi-file-earmark-spreadsheet text-primary fs-1"></i>
-                <h5 class="card-title mt-2">Knowledge Files</h5>
-                <p class="display-6 fw-bold text-primary">{{ kb_count|default(0) }}</p>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card border-success h-100">
-            <div class="card-body text-center">
-                <i class="bi bi-cpu text-success fs-1"></i>
-                <h5 class="card-title mt-2">Embedded Files</h5>
-                <p class="display-6 fw-bold text-success">{{ embedded_count|default(0) }}</p>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card border-info h-100">
-            <div class="card-body text-center">
-                <i class="bi bi-chat-dots text-info fs-1"></i>
-                <h5 class="card-title mt-2">Chat Sessions</h5>
-                <p class="display-6 fw-bold text-info">0</p>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card border-warning h-100">
-            <div class="card-body text-center">
-                <i class="bi bi-download text-warning fs-1"></i>
-                <h5 class="card-title mt-2">Exports</h5>
-                <p class="display-6 fw-bold text-warning">0</p>
-            </div>
-        </div>
+<!-- System Status -->
+<div class="compact-panel mb-3">
+    <div class="compact-panel-header">System Status</div>
+    <div class="compact-panel-body">
+        <ul class="status-list">
+            <li><span class="status-dot status-dot-on"></span>Flask Server: Running</li>
+            <li>
+                {% if embedded_count|default(0) > 0 %}
+                <span class="status-dot status-dot-on"></span>Embeddings: {{ embedded_count }} file(s) indexed
+                {% else %}
+                <span class="status-dot status-dot-off"></span>Embeddings: No files indexed
+                {% endif %}
+            </li>
+        </ul>
     </div>
 </div>
 
-<!-- Quick Actions -->
-<div class="row">
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header"><h5 class="mb-0">Quick Actions</h5></div>
-            <div class="card-body">
-                <a href="/upload" class="btn btn-primary me-2"><i class="bi bi-cloud-upload me-1"></i>Upload Excel</a>
-                {% if current_user and current_user.role != "Admin" %}
-                <a href="/chatbot" class="btn btn-success me-2"><i class="bi bi-chat-dots me-1"></i>Start Chat</a>
-                <a href="/preview" class="btn btn-info"><i class="bi bi-table me-1"></i>View Data</a>
-                {% endif %}
-            </div>
+<!-- Summary Cards + Quick Actions, one row -->
+<div class="stat-chip-row mb-4">
+    <div class="stat-chip">
+        <div class="stat-chip-icon stat-chip-icon-blue"><i class="bi bi-file-earmark-spreadsheet"></i></div>
+        <div>
+            <div class="stat-chip-value">{{ kb_count|default(0) }}</div>
+            <div class="stat-chip-label">Knowledge Files</div>
         </div>
     </div>
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header"><h5 class="mb-0">System Status</h5></div>
-            <div class="card-body">
-                <ul class="list-unstyled mb-0">
-                    <li><i class="bi bi-circle-fill text-success me-2"></i>Flask Server: Running</li>
-                    <li>
-                        {% if embedded_count|default(0) > 0 %}
-                        <i class="bi bi-circle-fill text-success me-2"></i>Embeddings: {{ embedded_count }} file(s) indexed
-                        {% else %}
-                        <i class="bi bi-circle-fill text-secondary me-2"></i>Embeddings: No files indexed
-                        {% endif %}
-                    </li>
-                </ul>
+    <div class="stat-chip">
+        <div class="stat-chip-icon stat-chip-icon-green"><i class="bi bi-cpu"></i></div>
+        <div>
+            <div class="stat-chip-value">{{ embedded_count|default(0) }}</div>
+            <div class="stat-chip-label">Embedded Files</div>
+        </div>
+    </div>
+    <div class="stat-chip">
+        <div class="stat-chip-icon stat-chip-icon-purple"><i class="bi bi-lightning-charge"></i></div>
+        <div>
+            <div class="stat-chip-label">Quick Actions</div>
+            <div class="stat-chip-actions-buttons">
+                <a href="/upload" class="btn btn-primary btn-sm"><i class="bi bi-cloud-upload me-1"></i>Upload Excel</a>
+                {% if current_user and current_user.role != "Admin" %}
+                <a href="/chatbot" class="btn btn-success btn-sm"><i class="bi bi-chat-dots me-1"></i>Start Chat</a>
+                <a href="/preview" class="btn btn-info btn-sm"><i class="bi bi-table me-1"></i>View Data</a>
+                {% endif %}
             </div>
         </div>
     </div>

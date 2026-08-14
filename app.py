@@ -22,7 +22,7 @@ from utils.migrations import (
     seed_development_team_import_config,
     seed_kikan_import_export_config,
 )
-from utils.permissions import login_required, roles_required
+from utils.permissions import login_required
 from utils.team_storage import team_folders_for_team_id
 
 
@@ -190,11 +190,14 @@ def create_app(config_name: str = "development") -> Flask:
 
         return {"current_user": get_current_user()}
 
-    # Register dashboard route
-    @app.route("/dashboard")
-    @login_required
-    def dashboard() -> str:
-        """Render the dashboard page (scoped to the current user's team)."""
+    def _render_dashboard() -> str:
+        """Render the dashboard page (scoped to the current user's team).
+
+        Shared by both the dedicated ``/dashboard`` route and ``/``
+        (for Admin -- see ``index`` below) so there's exactly one
+        implementation of "what the dashboard shows", not two routes
+        that could drift apart.
+        """
         from services.excel_service import ExcelService
         from services.embedding_service import EmbeddingService
 
@@ -218,17 +221,26 @@ def create_app(config_name: str = "development") -> Flask:
             embedded_count=embedded_count,
         )
 
-    # Default route — show chatbot. Team Manager only: Admin manages
-    # teams/config rather than doing estimation work, and doesn't need
-    # the AI Chatbot or Preview (see routes/chatbot.py, routes/preview.py
-    # for the matching gate on those blueprints). redirect_endpoint
-    # points a blocked Admin at /dashboard instead of back at "/"
-    # itself, which would otherwise immediately re-trigger this same
-    # check and loop.
+    # Register dashboard route
+    @app.route("/dashboard")
+    @login_required
+    def dashboard() -> str:
+        """Render the dashboard page (scoped to the current user's team)."""
+        return _render_dashboard()
+
+    # Default route. Team Manager lands on the AI Chatbot; Admin gets
+    # the Dashboard directly at "/" instead (no redirect hop) -- Admin
+    # manages teams/config rather than doing estimation work, and
+    # doesn't need the AI Chatbot or Preview (see routes/chatbot.py,
+    # routes/preview.py for the matching gate on those blueprints).
+    # Both roles can still also reach the dashboard at its own
+    # /dashboard URL.
     @app.route("/")
-    @roles_required("Team Manager", redirect_endpoint="dashboard")
+    @login_required
     def index() -> str:
-        """Render the chatbot page as the default landing page."""
+        """Render the landing page: Dashboard for Admin, AI Chatbot otherwise."""
+        if session.get("role") == "Admin":
+            return _render_dashboard()
         return render_template("chatbot.html")
 
     app.logger.info("MHES application initialized successfully.")
