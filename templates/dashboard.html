@@ -56,8 +56,10 @@
             <div class="card-header"><h5 class="mb-0">Quick Actions</h5></div>
             <div class="card-body">
                 <a href="/upload" class="btn btn-primary me-2"><i class="bi bi-cloud-upload me-1"></i>Upload Excel</a>
+                {% if current_user and current_user.role != "Admin" %}
                 <a href="/chatbot" class="btn btn-success me-2"><i class="bi bi-chat-dots me-1"></i>Start Chat</a>
                 <a href="/preview" class="btn btn-info"><i class="bi bi-table me-1"></i>View Data</a>
+                {% endif %}
             </div>
         </div>
     </div>

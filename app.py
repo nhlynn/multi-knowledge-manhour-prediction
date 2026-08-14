@@ -22,7 +22,7 @@ from utils.migrations import (
     seed_development_team_import_config,
     seed_kikan_import_export_config,
 )
-from utils.permissions import login_required
+from utils.permissions import login_required, roles_required
 from utils.team_storage import team_folders_for_team_id
 
 
@@ -218,9 +218,15 @@ def create_app(config_name: str = "development") -> Flask:
             embedded_count=embedded_count,
         )
 
-    # Default route — show chatbot
+    # Default route — show chatbot. Team Manager only: Admin manages
+    # teams/config rather than doing estimation work, and doesn't need
+    # the AI Chatbot or Preview (see routes/chatbot.py, routes/preview.py
+    # for the matching gate on those blueprints). redirect_endpoint
+    # points a blocked Admin at /dashboard instead of back at "/"
+    # itself, which would otherwise immediately re-trigger this same
+    # check and loop.
     @app.route("/")
-    @login_required
+    @roles_required("Team Manager", redirect_endpoint="dashboard")
     def index() -> str:
         """Render the chatbot page as the default landing page."""
         return render_template("chatbot.html")

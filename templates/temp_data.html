@@ -156,7 +156,11 @@
 <div id="emptyState" class="text-center text-muted py-5" style="display:none;">
     <div class="empty-icon mx-auto mb-3"><i class="bi bi-inbox"></i></div>
     <p class="mb-1 fw-medium" style="color:#475569;">No temporary data stashed.</p>
+    {% if current_user and current_user.role != "Admin" %}
     <p class="mb-0" style="font-size:0.85rem;">This fills up when you have Preview data and start a new session from the <a href="/">AI Chatbot</a> nav link.</p>
+    {% else %}
+    <p class="mb-0" style="font-size:0.85rem;">This fills up when a team has Preview data and starts a new session from their AI Chatbot.</p>
+    {% endif %}
 </div>
 
 <!-- Master list table -->

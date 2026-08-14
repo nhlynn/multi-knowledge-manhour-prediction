@@ -7,10 +7,16 @@ from flask import Blueprint, current_app, flash, jsonify, redirect, render_templ
 
 from scheduler.temp_data_service import TempDataService
 from utils.pagination import parse_page_param, total_pages_for
-from utils.permissions import require_login
+from utils.permissions import require_login, roles_required
 
 preview_bp = Blueprint("preview", __name__)
-# Any logged-in role can create/preview estimates.
+# Any logged-in role can reach this blueprint by default -- Temporary
+# Data List/Detail (below) stay open to Admin for cross-team oversight
+# (matching Export History's own Admin-sees-every-team pattern via
+# _team_id_filter). Only the actual estimate-editing screen
+# (preview_page, "/") additionally requires Team Manager -- see its
+# own @roles_required decorator, since Admin manages teams/config
+# rather than doing estimation work.
 preview_bp.before_request(require_login)
 
 
@@ -32,6 +38,7 @@ def _team_id_filter() -> int | None:
 
 
 @preview_bp.route("/", methods=["GET"])
+@roles_required("Team Manager", redirect_endpoint="dashboard")
 def preview_page() -> str:
     """Render the preview page.
 

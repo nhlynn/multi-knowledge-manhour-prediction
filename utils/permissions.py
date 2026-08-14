@@ -41,11 +41,19 @@ def _unauthenticated_response() -> GateResponse:
     return redirect(url_for("auth.login_page", next=request.path))
 
 
-def _forbidden_response() -> GateResponse:
+def _forbidden_response(redirect_endpoint: str = "index") -> GateResponse:
+    """Same permission-denied response ``require_roles``/``roles_required``
+    always give, but the redirect target is configurable: a role gate
+    whose blocked role is also the default landing page (e.g. Admin
+    blocked from ``index``, the Team-Manager-only Chatbot/Preview
+    default page) must not redirect back to that same blocked page --
+    that would bounce right back into this same check and loop.
+    Callers that don't pass anything keep the original "index" target.
+    """
     if _wants_json():
         return jsonify({"error": "You do not have permission to perform this action."}), 403
     flash("You do not have permission to access that page.", "danger")
-    return redirect(url_for("index"))
+    return redirect(url_for(redirect_endpoint))
 
 
 def _forbidden_response_strict() -> GateResponse:
@@ -88,13 +96,17 @@ def _check_login() -> GateResponse | None:
     return None
 
 
-def _check_roles(allowed: set[str]) -> GateResponse | None:
-    """Return an error response if not logged in or not in ``allowed``, else None."""
+def _check_roles(allowed: set[str], redirect_endpoint: str = "index") -> GateResponse | None:
+    """Return an error response if not logged in or not in ``allowed``, else None.
+
+    ``redirect_endpoint`` is forwarded to ``_forbidden_response`` -- see
+    its docstring for why a role gate needs this configurable.
+    """
     response = _check_login()
     if response is not None:
         return response
     if session.get("role") not in allowed:
-        return _forbidden_response()
+        return _forbidden_response(redirect_endpoint)
     return None
 
 
@@ -129,14 +141,22 @@ def login_required(view_func: Callable) -> Callable:
     return wrapped
 
 
-def roles_required(*roles: str) -> Callable:
-    """Require a logged-in user whose role is one of ``roles``."""
+def roles_required(*roles: str, redirect_endpoint: str = "index") -> Callable:
+    """Require a logged-in user whose role is one of ``roles``.
+
+    Args:
+        redirect_endpoint: Where a wrong-role HTML request is sent
+            (see ``_forbidden_response``'s docstring) -- override this
+            when the decorated route IS "index" or another role's
+            default landing page, so a blocked role doesn't get
+            bounced right back into the same check.
+    """
     allowed = _validate_roles(roles)
 
     def decorator(view_func: Callable) -> Callable:
         @wraps(view_func)
         def wrapped(*args, **kwargs):
-            return _check_roles(allowed) or view_func(*args, **kwargs)
+            return _check_roles(allowed, redirect_endpoint) or view_func(*args, **kwargs)
 
         return wrapped
 
@@ -152,12 +172,17 @@ def require_login() -> GateResponse | None:
     return _check_login()
 
 
-def require_roles(*roles: str) -> Callable:
-    """Return a ``before_request`` hook requiring one of ``roles`` for a whole blueprint."""
+def require_roles(*roles: str, redirect_endpoint: str = "index") -> Callable:
+    """Return a ``before_request`` hook requiring one of ``roles`` for a whole blueprint.
+
+    Args:
+        redirect_endpoint: Where a wrong-role HTML request is sent --
+            see ``roles_required``'s identical parameter.
+    """
     allowed = _validate_roles(roles)
 
     def hook() -> GateResponse | None:
-        return _check_roles(allowed)
+        return _check_roles(allowed, redirect_endpoint)
 
     return hook
 

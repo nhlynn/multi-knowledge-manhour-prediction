@@ -7,12 +7,15 @@ from flask import Blueprint, current_app, jsonify, render_template, request, ses
 
 from services.embedding_service import EmbeddingService
 from services.search_service import SearchService
-from utils.permissions import require_login
+from utils.permissions import require_roles
 from utils.team_storage import team_folders_for_team_id
 
 chatbot_bp = Blueprint("chatbot", __name__)
-# Any logged-in role can use the chatbot.
-chatbot_bp.before_request(require_login)
+# Team Manager only -- Admin manages teams/config rather than doing
+# estimation work; see app.py's own "/" route (the chatbot PAGE) for
+# the matching gate, and its comment for why redirect_endpoint points
+# at /dashboard rather than the default "index".
+chatbot_bp.before_request(require_roles("Team Manager", redirect_endpoint="dashboard"))
 
 
 @chatbot_bp.route("/", methods=["GET"])

@@ -447,6 +447,7 @@
             </a>
             <div class="sidebar-nav-scroll">
                 <!-- <div class="sidebar-section-label">Navigation</div> -->
+                {% if current_user and current_user.role != "Admin" %}
                 <ul class="sidebar-nav">
                     <li>
                         <a href="/" id="navAiChatbot" class="{% if request.path == '/' %}active{% endif %}" title="AI Chatbot">
@@ -461,6 +462,7 @@
                         </a>
                     </li>
                 </ul>
+                {% endif %}
 
                 <div class="sidebar-section-label">History Management</div>
                 <ul class="sidebar-nav">

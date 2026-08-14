@@ -49,11 +49,25 @@ def _safe_next(next_url: str) -> str | None:
     return None
 
 
+def _default_landing_endpoint(role: str) -> str:
+    """Return the endpoint a just-logged-in (or already-logged-in) user
+    of this role should land on.
+
+    Admin gets ``dashboard`` rather than ``index`` (the AI Chatbot
+    page) since ``index``/the Chatbot/Preview blueprints are
+    Team-Manager-only (see ``app.py``'s own ``/`` route and
+    ``routes/chatbot.py``/``routes/preview.py``'s role gates) — sending
+    an Admin to ``index`` would immediately bounce them back out via
+    that same check.
+    """
+    return "dashboard" if role == "Admin" else "index"
+
+
 @auth_bp.route("/login", methods=["GET"])
 def login_page() -> str:
     """Render the login page (redirects to the landing page if already logged in)."""
     if session.get("user_id") is not None:
-        return redirect(url_for("index"))
+        return redirect(url_for(_default_landing_endpoint(session.get("role"))))
     return render_template("login.html", next_url=request.args.get("next", ""))
 
 
@@ -91,7 +105,7 @@ def login() -> str:
 
     logger.info("User %r (id=%s) logged in.", user["username"], user["id"])
     flash(f"Welcome back, {user['username']}.", "success")
-    return redirect(_safe_next(next_url) or url_for("index"))
+    return redirect(_safe_next(next_url) or url_for(_default_landing_endpoint(user["role"])))
 
 
 @auth_bp.route("/logout", methods=["POST"])
@@ -122,7 +136,7 @@ _FORGOT_PASSWORD_WINDOW_SECONDS = 15 * 60
 def forgot_password_page() -> str:
     """Render the Forgot Password request form."""
     if session.get("user_id") is not None:
-        return redirect(url_for("index"))
+        return redirect(url_for(_default_landing_endpoint(session.get("role"))))
     return render_template("forgot_password.html")
 
 
@@ -208,7 +222,7 @@ def reset_password_page(token: str) -> str:
     submit) — no point showing a form the POST would just reject anyway.
     """
     if session.get("user_id") is not None:
-        return redirect(url_for("index"))
+        return redirect(url_for(_default_landing_endpoint(session.get("role"))))
 
     status = _auth_service().get_reset_token_status(token)
     return _render_for_token_status(status, token)
