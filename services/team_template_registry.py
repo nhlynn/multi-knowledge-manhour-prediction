@@ -30,14 +30,13 @@ def _build_registry() -> dict[str, TeamTemplateSpec]:
     from utils.migrations.bamawl_import_export_config import _build_bamawl_template_spec
     from utils.migrations.kikan_import_export_config import _build_kikan_template_spec
     from utils.migrations.sgl_import_export_config import _build_sgl_template_spec
+    from utils.migrations.ssd_import_export_config import _build_ssd_template_spec
 
     return {
         "Bamawl Team": _build_bamawl_template_spec(),
         "KiKan Team": _build_kikan_template_spec(),
         "SGL Team": _build_sgl_template_spec(),
-        # Future team-specific template, once its own config module
-        # defines its own spec analogously to Bamawl's/KiKan's/SGL's:
-        #   "SSD Team": _build_ssd_template_spec(),
+        "SSD Team": _build_ssd_template_spec(),
     }
 
 

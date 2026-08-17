@@ -34,14 +34,17 @@ from services.bamawl_export_builder import BamawlExportBuilder, BamawlExportErro
 from services.export_workbook_service import build_workbook
 from services.kikan_export_builder import KikanExportBuilder, KikanExportError
 from services.sgl_export_builder import SglExportBuilder, SglExportError
+from services.ssd_export_builder import SsdExportBuilder, SsdExportError
 
 __all__ = [
     "BamawlExportError",
     "KikanExportError",
     "SglExportError",
+    "SsdExportError",
     "BamawlExportBuilder",
     "KikanExportBuilder",
     "SglExportBuilder",
+    "SsdExportBuilder",
     "DefaultExportStrategy",
     "EXPORT_STRATEGY_REGISTRY",
     "get_export_strategy_class",
@@ -74,9 +77,7 @@ EXPORT_STRATEGY_REGISTRY: dict[str, type[BaseExportService]] = {
     "Bamawl Team": BamawlExportBuilder,
     "KiKan Team": KikanExportBuilder,
     "SGL Team": SglExportBuilder,
-    # Future team-specific export builder, once its own module defines
-    # its own build_ssd_workbook function analogously to Bamawl's/KiKan's/SGL's:
-    #   "SSD Team": SsdExportStrategy,
+    "SSD Team": SsdExportBuilder,
 }
 
 

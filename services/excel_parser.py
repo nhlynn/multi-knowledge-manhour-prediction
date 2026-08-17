@@ -681,12 +681,28 @@ def _build_task_output(
     }
 
 
+# The fixed set of keys _build_activity_output itself populates. Any
+# other field a team-specific parser adds to an activity (e.g. SSD's
+# per-phase ``standard_hours``/``adjustment_hours`` breakdown) is passed
+# through generically below, mirroring _build_task_output's own
+# extra-field passthrough. Teams whose activities carry none of these
+# are entirely unaffected.
+_KNOWN_ACTIVITY_FIELDS = {
+    "id", "task_detail", "estimate_hours", "buffer_scope",
+    "buffer_note", "standalone_buffer_hours", "text",
+}
+
+
 def _build_activity_output(
     category_name: str, task_name: str, task_buffer: float, act: dict[str, Any],
 ) -> dict[str, Any]:
     """Build one activity detail's full output record, including its
-    embedding-ready ``text`` and buffer-scope explanation.
+    embedding-ready ``text`` and buffer-scope explanation, plus any
+    extra team-specific field already present on ``act`` (e.g. SSD's
+    ``standard_hours``/``adjustment_hours`` per-phase breakdown) passed
+    through as-is.
     """
+    extra_fields = {k: v for k, v in act.items() if k not in _KNOWN_ACTIVITY_FIELDS}
     return {
         "id": act["id"],
         "task_detail": act["task_detail"],
@@ -695,6 +711,7 @@ def _build_activity_output(
         "buffer_note": _activity_buffer_note(task_name, task_buffer),
         "standalone_buffer_hours": 0.5,
         "text": _activity_context_text(category_name, task_name, task_buffer, act),
+        **extra_fields,
     }
 
 

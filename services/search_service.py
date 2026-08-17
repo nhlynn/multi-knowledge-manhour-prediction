@@ -462,11 +462,7 @@ def _best_match_level(
     best_task_tier = 0
 
     for task in tasks:
-        task_name = task.get("task", "")
-        task_lower = task_name.strip().lower()
-        if task_lower:
-            tier = _match_tier(query_lower, task_lower)
-            best_task_tier = max(best_task_tier, tier)
+        best_task_tier = max(best_task_tier, _task_best_tier(task, query_lower))
 
         for detail in task.get("task_details", []):
             detail_name = detail.get("task_detail", "")
@@ -494,6 +490,48 @@ def _match_tier(query_lower: str, name_lower: str) -> int:
     if query_lower in name_lower:
         return 1
     return 0
+
+
+# Extra task-level text fields the exact/partial matcher searches in
+# addition to the task name -- so a query can match a task by its
+# 機能概要 (overview) or 要件 (requirement) text, not only its 機能名.
+# Team-agnostic: a task without these fields (every team except SSD
+# today) simply contributes nothing here, exactly as before this
+# existed -- no team-specific branching, mirroring _extra_task_fields'
+# generic passthrough philosophy. Adding a field name here makes it
+# searchable for any team whose parser populates it.
+_SEARCHABLE_TASK_TEXT_FIELDS = ("overview", "requirement")
+
+
+def _task_search_values(task: dict[str, Any]) -> list[str]:
+    """Return every lowercased text value a query may match this task
+    on: its name plus any populated _SEARCHABLE_TASK_TEXT_FIELDS.
+    Blank/missing fields are skipped.
+    """
+    values = []
+    name = task.get("task", "")
+    if name and name.strip():
+        values.append(name.strip().lower())
+    for field in _SEARCHABLE_TASK_TEXT_FIELDS:
+        val = task.get(field, "")
+        if isinstance(val, str) and val.strip():
+            values.append(val.strip().lower())
+    return values
+
+
+def _task_best_tier(task: dict[str, Any], query_lower: str) -> int:
+    """Best match tier of ``query_lower`` against any of this task's
+    searchable text values (name / overview / requirement)."""
+    best = 0
+    for value in _task_search_values(task):
+        best = max(best, _match_tier(query_lower, value))
+    return best
+
+
+def _task_matches(task: dict[str, Any], query_lower: str) -> bool:
+    """True if the query exact/contains/contained-by matches this task's
+    name or any of its searchable text fields."""
+    return any(_name_matches(query_lower, value) for value in _task_search_values(task))
 
 
 def _find_matching_details(
@@ -537,8 +575,7 @@ def _find_matching_tasks(
     hits: list[dict[str, Any]] = []
     for task in tasks:
         task_name = task.get("task", "")
-        task_lower = task_name.strip().lower()
-        if task_lower and _name_matches(query_lower, task_lower) and task.get("id"):
+        if _task_matches(task, query_lower) and task.get("id"):
             hits.append({
                 "id": task["id"],
                 "type": "task",
@@ -764,6 +801,31 @@ def _extra_task_fields(task: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in task.items() if k not in _KNOWN_TASK_FIELDS}
 
 
+# Internal activity fields that must NOT leak into a display row: the
+# slug id, the embedding text, and the buffer-explanation scaffolding.
+# Everything else on an activity (its label, estimate, and any
+# team-specific per-phase breakdown like SSD's 標準/調整 hours) is shown.
+_ACTIVITY_INTERNAL_FIELDS = {
+    "id", "text", "buffer_scope", "buffer_note", "standalone_buffer_hours",
+}
+
+
+def _activity_display_row(a: dict[str, Any]) -> dict[str, Any]:
+    """Build one activity's display row: its label and estimate hours,
+    plus any extra per-phase breakdown fields (e.g. SSD's 標準作業工数 /
+    調整工数 alongside 見積工数) passed through as-is so the UI can show
+    every hour column, not just the estimate. Internal scaffolding
+    fields (id, embedding text, buffer notes) are dropped."""
+    display = {
+        "task_detail": a.get("task_detail", ""),
+        "estimate_hours": a.get("estimate_hours", 0),
+    }
+    for k, v in a.items():
+        if k not in display and k not in _ACTIVITY_INTERNAL_FIELDS:
+            display[k] = v
+    return display
+
+
 def _build_task_row(task_info: dict[str, Any], full_task: dict[str, Any]) -> dict[str, Any]:
     """Build one output task row, showing either all of a task's
     activities ("full" mode) or only the ones actually matched
@@ -772,14 +834,11 @@ def _build_task_row(task_info: dict[str, Any], full_task: dict[str, Any]) -> dic
     all_activities = full_task.get("activities", [])
 
     if task_info["mode"] == "full":
-        activities = [
-            {"task_detail": a.get("task_detail", ""), "estimate_hours": a.get("estimate_hours", 0)}
-            for a in all_activities
-        ]
+        activities = [_activity_display_row(a) for a in all_activities]
     else:
         matched = task_info["matched_details"]
         activities = [
-            {"task_detail": a.get("task_detail", ""), "estimate_hours": a.get("estimate_hours", 0)}
+            _activity_display_row(a)
             for a in all_activities
             if a.get("task_detail", "") in matched
         ]

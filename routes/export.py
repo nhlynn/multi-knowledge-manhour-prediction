@@ -44,10 +44,12 @@ from services.export_strategies import (
     DefaultExportStrategy,
     KikanExportError,
     SglExportError,
+    SsdExportError,
     get_export_strategy_class,
 )
 from services.kikan_export_builder import KikanExportBuilder
 from services.sgl_export_builder import SglExportBuilder
+from services.ssd_export_builder import SsdExportBuilder
 from services.export_workbook_service import DEFAULT_EXPORT_TEMPLATE
 from services.gcs_service import (
     GCSError,
@@ -179,6 +181,12 @@ def _select_export_strategy(
             created_by=created_by,
             template_path=SglExportBuilder.template_path(current_app.root_path),
         )
+    elif strategy_cls is SsdExportBuilder:
+        return SsdExportBuilder(), ExportContext(
+            filepath=build_path, categories=categories, project_name=project_name,
+            created_by=created_by,
+            template_path=SsdExportBuilder.template_path(current_app.root_path),
+        )
 
     return DefaultExportStrategy(), ExportContext(
         filepath=build_path, categories=categories, project_name=project_name,
@@ -237,6 +245,11 @@ def export_excel():
         # Same reasoning as BamawlExportError above, independently for
         # SGL Team's own export template.
         logger.warning("SGL export rejected for project=%r: %s", project_name, e)
+        return jsonify({"error": str(e)}), 400
+    except SsdExportError as e:
+        # Same reasoning as BamawlExportError above, independently for
+        # SSD Team's own export template.
+        logger.warning("SSD export rejected for project=%r: %s", project_name, e)
         return jsonify({"error": str(e)}), 400
     except Exception:
         # Logged with full traceback for diagnosis; the client only ever

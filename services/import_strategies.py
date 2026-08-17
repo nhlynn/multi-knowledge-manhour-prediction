@@ -33,11 +33,12 @@ from typing import Any, Callable
 
 from services.kikan_import_parser import kikan_excel_to_nested_json
 from services.sgl_import_parser import sgl_excel_to_nested_json
+from services.ssd_import_parser import ssd_excel_to_nested_json
 
 CUSTOM_IMPORT_PARSERS: dict[str, Callable[[str], list[dict[str, Any]]]] = {
     "SGL Team": sgl_excel_to_nested_json,
     "KiKan Team": kikan_excel_to_nested_json,
-    # "SSD Team": ssd_excel_to_nested_json,  -- only if SSD's template ever needs one too
+    "SSD Team": ssd_excel_to_nested_json,
 }
 
 
