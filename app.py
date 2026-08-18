@@ -191,7 +191,15 @@ def create_app(config_name: str = "development") -> Flask:
         return {"current_user": get_current_user()}
 
     def _render_dashboard() -> str:
-        """Render the dashboard page (scoped to the current user's team).
+        """Render the dashboard page.
+
+        For a Team Manager the counts are scoped to their own team. For
+        an Admin — who manages the whole system rather than doing
+        estimation work under one team — the counts are aggregated
+        across ALL teams, so the dashboard reflects the system as a
+        whole (knowledge files are imported under the estimation teams,
+        never under the Admin's own team, so a team-scoped Admin view
+        would always read 0 and be misleading).
 
         Shared by both the dedicated ``/dashboard`` route and ``/``
         (for Admin -- see ``index`` below) so there's exactly one
@@ -201,20 +209,43 @@ def create_app(config_name: str = "development") -> Flask:
         from services.excel_service import ExcelService
         from services.embedding_service import EmbeddingService
 
-        kb_folder, embeddings_folder, team_slug = team_folders_for_team_id(
-            app.config["TEAMS_FOLDER"], app.config["MHES_DB_PATH"], session["team_id"],
-        )
-        excel_svc = ExcelService(kb_folder=kb_folder)
-        emb_svc = EmbeddingService(
-            model_name=app.config["EMBEDDING_MODEL"],
-            embeddings_folder=embeddings_folder,
-            team_slug=team_slug,
-        )
-        kb_files = excel_svc.list_knowledge_files()
-        kb_count = len(kb_files)
-        embedded_count = sum(
-            1 for f in kb_files if emb_svc.has_index(f["filename"])
-        )
+        def _counts_for_team(team_id: int) -> tuple[int, int]:
+            """(knowledge_file_count, embedded_file_count) for one team."""
+            kb_folder, embeddings_folder, team_slug = team_folders_for_team_id(
+                app.config["TEAMS_FOLDER"], app.config["MHES_DB_PATH"], team_id,
+            )
+            excel_svc = ExcelService(kb_folder=kb_folder)
+            emb_svc = EmbeddingService(
+                model_name=app.config["EMBEDDING_MODEL"],
+                embeddings_folder=embeddings_folder,
+                team_slug=team_slug,
+            )
+            kb_files = excel_svc.list_knowledge_files()
+            embedded = sum(1 for f in kb_files if emb_svc.has_index(f["filename"]))
+            return len(kb_files), embedded
+
+        if session.get("role") == "Admin":
+            # System-wide: sum every team's counts. Skip any team whose
+            # folders can't be resolved rather than failing the whole
+            # dashboard.
+            from repositories.team_repository import TeamRepository
+
+            kb_count = 0
+            embedded_count = 0
+            for team in TeamRepository(app.config["MHES_DB_PATH"]).list_all():
+                try:
+                    team_kb, team_embedded = _counts_for_team(team["id"])
+                except Exception:
+                    app.logger.warning(
+                        "Dashboard: could not read counts for team id=%s (%s); skipping.",
+                        team.get("id"), team.get("name"),
+                    )
+                    continue
+                kb_count += team_kb
+                embedded_count += team_embedded
+        else:
+            kb_count, embedded_count = _counts_for_team(session["team_id"])
+
         return render_template(
             "dashboard.html",
             kb_count=kb_count,
