@@ -581,6 +581,32 @@ class SglExportBuilder(BaseExportService):
         """
         return os.path.join(app_root_path, "simple_resource", "sgl_import_export_format.xlsx")
 
+    @staticmethod
+    def fixed_phase_labels(app_root_path: str) -> list[str]:
+        """The template's fixed phase-column labels, in column order --
+        the exact set an SGL task's activities must match to export
+        correctly (an activity whose name isn't one of these has no
+        column to write into, so its hours would silently drop). The
+        Preview page uses this to fix each task's activity rows to this
+        set, so a user can never add a non-matching activity. Returns
+        [] if the template can't be read (Preview then falls back to
+        leaving activities editable)."""
+        path = SglExportBuilder.template_path(app_root_path)
+        if not os.path.isfile(path):
+            return []
+        try:
+            wb = openpyxl.load_workbook(path)
+            if SGL_SHEET_NAME not in wb.sheetnames:
+                return []
+            ws = wb[SGL_SHEET_NAME]
+            headers = _resolve_header_columns(ws)
+            group_col = headers.get(_PHASE_GROUP_HEADER)
+            if not group_col:
+                return []
+            return [label for label, _ in _resolve_phase_columns(ws, group_col)]
+        except Exception:
+            return []
+
     def build(self, context: ExportContext) -> None:
         build_sgl_workbook(
             context.filepath, context.categories, context.template_path, context.project_name,

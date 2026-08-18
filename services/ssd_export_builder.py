@@ -439,6 +439,27 @@ class SsdExportBuilder(BaseExportService):
         """
         return os.path.join(app_root_path, "simple_resource", "ssd_import_export_format.xlsx")
 
+    @staticmethod
+    def fixed_phase_labels(app_root_path: str) -> list[str]:
+        """The template's four fixed phase labels (詳細設計/実装/単体テスト/
+        結合テスト), read from the 見積工数 group's sub-columns. The Preview
+        page fixes each SSD task's activity rows to exactly this set, so
+        a non-matching activity (which would have no column to export
+        into) can never be added. Returns [] if the template can't be
+        read."""
+        path = SsdExportBuilder.template_path(app_root_path)
+        if not os.path.isfile(path):
+            return []
+        try:
+            wb = openpyxl.load_workbook(path)
+            if SSD_DETAIL_SHEET not in wb.sheetnames:
+                return []
+            ws = wb[SSD_DETAIL_SHEET]
+            cols = _resolve_field_columns(ws)
+            return [label for label, _ in _resolve_group_columns(ws, cols, _ESTIMATE_GROUP_HEADER)]
+        except Exception:
+            return []
+
     def build(self, context: ExportContext) -> None:
         build_ssd_workbook(
             context.filepath,

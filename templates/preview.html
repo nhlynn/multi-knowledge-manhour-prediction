@@ -344,6 +344,36 @@
 {% block extra_js %}
 <script>
 (function() {
+    // The current team's name, injected server-side (routes/preview.py).
+    // Only teams whose export actually consumes a task's buffer hours
+    // show the editable Buffer field; for every other team it changes
+    // nothing on export, so showing it (and the redundant Est==Total)
+    // is just noise. Today only Bamawl Team's export uses buffer —
+    // KiKan/SGL write =SUM(phase columns) and SSD has no buffer concept.
+    var TEAM_NAME = {{ team_name|tojson }};
+    var BUFFER_EXPORT_TEAMS = ['Bamawl Team'];
+    function bufferApplies() {
+        return BUFFER_EXPORT_TEAMS.indexOf(TEAM_NAME) !== -1;
+    }
+
+    // The current team's export-template phase set, injected server-side
+    // (routes/preview.py). Non-empty only for teams whose export has
+    // FIXED phase columns (SGL: 要件定義/設計/開発/テスト/クラウド対応/その他;
+    // SSD: 詳細設計/実装/単体テスト/結合テスト). For such teams every task's
+    // activities must be exactly this set in this order — an activity
+    // whose name isn't one of these has no column to export into, so its
+    // hours would silently drop. The page therefore normalizes each task
+    // to this set, drops the free-text "Add Activity", and auto-fills new
+    // tasks. Empty for free-form teams (Bamawl/KiKan).
+    var FIXED_PHASES = {{ fixed_phases|tojson }};
+    function hasFixedPhases() { return Array.isArray(FIXED_PHASES) && FIXED_PHASES.length > 0; }
+
+    // Only SSD Team's phases carry the 標準/調整/見積 (standard/adjustment/
+    // estimate) breakdown — SGL's fixed phases are a single 見積 value
+    // each, so it must NOT get the breakdown columns or breakdown fields.
+    var BREAKDOWN_TEAMS = ['SSD Team'];
+    function teamUsesBreakdown() { return BREAKDOWN_TEAMS.indexOf(TEAM_NAME) !== -1; }
+
     var raw = sessionStorage.getItem('previewData');
     var data;
     try { data = JSON.parse(raw || '{}'); } catch(e) { data = {}; }
@@ -376,6 +406,7 @@
     });
 
     // Initial render
+    normalizeFixedPhases(categories);
     if (categories.length === 0) {
         showEmpty();
     } else {
@@ -430,23 +461,32 @@
         renderFooter();
     }
 
-    // SSD Team's fixed phase set — every SSD task has exactly these
-    // four activities, mapped to the template's 標準/調整/見積 columns.
-    var SSD_PHASES = ['詳細設計', '実装', '単体テスト', '結合テスト'];
+    // The current team's export-template phase set, injected server-side
+    // (routes/preview.py). Non-empty only for teams whose export has
+    // FIXED phase columns (SGL: 要件定義/設計/開発/テスト/クラウド対応/その他;
+    // SSD: 詳細設計/実装/単体テスト/結合テスト). For such teams every task's
+    // activities must be exactly this set in this order — an activity
+    // whose name isn't one of these has no column to export into, so its
+    // hours would silently drop. The page therefore normalizes each
+    // task to this set, drops the free-text "Add Activity", and
+    // auto-fills new tasks. Empty for free-form teams (Bamawl/KiKan).
+    // (FIXED_PHASES / hasFixedPhases are declared near TEAM_NAME above.)
 
     function makeNewTask() {
-        // In an SSD preview (breakdown present), a new task must carry
-        // the same fixed four phases with the 標準/調整/見積 breakdown
-        // fields, so it renders and exports like every other SSD task
-        // (fixed phases, no buffer, no Add Activity). Other teams get a
-        // single blank activity as before.
-        if (previewHasBreakdown()) {
+        // A new task for a fixed-phase team gets exactly the template's
+        // phases (each 0h). SSD's phases also carry the 標準/調整/見積
+        // breakdown fields; SGL's are estimate-only. Free-form teams get
+        // a single blank activity as before.
+        if (hasFixedPhases()) {
+            var withBreakdown = teamUsesBreakdown();
             return {
                 task: 'New Task',
                 estimate_hours: 0, buffer_hours: 0, total_hours: 0,
                 difficulty: '', remarks: '',
-                activities: SSD_PHASES.map(function(p) {
-                    return { task_detail: p, estimate_hours: 0, standard_hours: 0, adjustment_hours: 0 };
+                activities: FIXED_PHASES.map(function(p) {
+                    return withBreakdown
+                        ? { task_detail: p, estimate_hours: 0, standard_hours: 0, adjustment_hours: 0 }
+                        : { task_detail: p, estimate_hours: 0 };
                 })
             };
         }
@@ -455,6 +495,33 @@
             estimate_hours: 0, buffer_hours: 0, total_hours: 0, remarks: '',
             activities: [{ task_detail: 'New Activity', estimate_hours: 0 }]
         };
+    }
+
+    function normalizeFixedPhases(cats) {
+        // For a fixed-phase team, rewrite every task's activities to
+        // exactly FIXED_PHASES in order: keep the hours of phases the
+        // task already has (matched by name, whitespace-insensitive),
+        // and fill any missing phase with 0 — so a chat-selected task
+        // that only carried some phases still shows/exports the full set.
+        // Missing phases get breakdown fields (標準/調整) only for teams
+        // that use them (SSD); SGL's filled phases are estimate-only, so
+        // its rows never sprout empty 標準/調整 columns.
+        if (!hasFixedPhases()) return;
+        var withBreakdown = teamUsesBreakdown();
+        var norm = function(s) { return String(s || '').replace(/\s+/g, '').toLowerCase(); };
+        cats.forEach(function(cat) {
+            (cat.tasks || []).forEach(function(t) {
+                var existing = {};
+                (t.activities || []).forEach(function(a) { existing[norm(a.task_detail)] = a; });
+                t.activities = FIXED_PHASES.map(function(p) {
+                    var a = existing[norm(p)];
+                    if (a) { a.task_detail = p; return a; }
+                    return withBreakdown
+                        ? { task_detail: p, estimate_hours: 0, standard_hours: 0, adjustment_hours: 0 }
+                        : { task_detail: p, estimate_hours: 0 };
+                });
+            });
+        });
     }
 
     function previewHasBreakdown() {
@@ -482,10 +549,10 @@
             });
         });
 
-        var hideBuffer = previewHasBreakdown();
+        var hideBuffer = !bufferApplies();
         var summaryInner;
         if (hideBuffer) {
-            // SSD: Estimate == Total (no buffer). Show a single Total.
+            // Estimate == Total (no buffer). Show a single Total.
             summaryInner =
                 '<div class="ss-stat ss-total">' +
                     '<span class="ss-label">Total</span>' +
@@ -574,11 +641,12 @@
                     return a.standard_hours !== undefined || a.adjustment_hours !== undefined;
                 });
 
-                // For SSD (no buffer), Est and Total are always equal —
-                // showing both is redundant. Show a single total instead.
-                // Other teams keep the full Est · Buf · Total breakdown.
+                // Est and Total are equal for any team whose export
+                // doesn't use buffer (SSD/SGL/KiKan) — show a single
+                // Total. Only Bamawl (buffer consumed on export) shows
+                // the full Est · Buf · Total with an editable Buffer.
                 var statsHtml;
-                if (taskHasBreakdown) {
+                if (!bufferApplies()) {
                     statsHtml =
                         '<strong class="ts-total"><span data-sum="final" data-ci="' + ci + '" data-ti="' + ti + '">' + fmt2(task.total_hours) + '</span>h</strong>' +
                         '<span data-sum="estimate" data-ci="' + ci + '" data-ti="' + ti + '" style="display:none;">' + fmt2(task.estimate_hours) + '</span>';
@@ -640,13 +708,15 @@
                                 '<span class="act-h-label">h</span>' +
                             '</div>';
                     }
-                    // SSD Team's phases are a FIXED structural set mapped
-                    // to specific template columns by their label, so its
-                    // activity rows are not deletable and their phase name
-                    // is read-only — renaming or removing one would break
-                    // the phase→column mapping on export. Other teams keep
-                    // the delete button and editable detail name.
-                    if (hasBreakdown) {
+                    // A fixed-phase team's phases are structural (mapped
+                    // to specific template columns by label), so its
+                    // activity rows are not deletable and their phase
+                    // name is read-only — renaming or removing one would
+                    // break the phase→column mapping on export. Free-form
+                    // teams keep the delete button and editable name. The
+                    // hours cell (single 見積 or the 標準/調整/見積 breakdown)
+                    // is chosen separately above by hasBreakdown.
+                    if (hasFixedPhases()) {
                         html +=
                             '<div class="activity-row d-flex align-items-center gap-2 px-3 py-2">' +
                                 '<span class="flex-grow-1" style="padding-left:0.35rem;">' + esc(act.task_detail) + '</span>' +
@@ -662,14 +732,13 @@
                     }
                 });
 
-                // + Add Activity — hidden for SSD Team's tasks, whose
-                // activities are a FIXED set of four template phases
-                // (詳細設計/実装/単体テスト/結合テスト), each mapped to its own
-                // 標準/調整/見積 columns. An added 5th activity would have
-                // no column to export into, so its hours would silently
-                // drop and the exported total would no longer match
-                // Preview. Other teams (flexible activity lists) keep it.
-                if (!taskHasBreakdown) {
+                // + Add Activity — hidden for any fixed-phase team
+                // (SGL/SSD), whose activities are exactly the template's
+                // phase columns. A free-text activity added here would
+                // have no column to export into, so its hours would
+                // silently drop and the exported total would no longer
+                // match Preview. Free-form teams (Bamawl/KiKan) keep it.
+                if (!hasFixedPhases()) {
                     html +=
                         '<div class="act-footer px-3 py-2">' +
                             '<button class="add-btn btn btn-sm" data-add="activity" data-ci="' + ci + '" data-ti="' + ti + '">' +
@@ -701,7 +770,7 @@
 
     function renderFooter() {
         var totals = calcTotals();
-        var footBuffer = previewHasBreakdown() ? '' :
+        var footBuffer = !bufferApplies() ? '' :
             '<div class="total-item"><div class="total-item-label">Buffer</div><div class="total-item-val">' + fmt2(totals.buffer) + 'h</div></div>';
         document.getElementById('previewFoot').innerHTML =
             '<div class="totals-panel">' +

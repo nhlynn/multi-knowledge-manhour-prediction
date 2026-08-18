@@ -67,10 +67,54 @@ def _team_id_list_filter() -> int | None:
 def preview_page() -> str:
     """Render the preview page.
 
+    Passes the current team's name and, for teams whose export template
+    has a fixed phase-column set (SGL/SSD), that fixed set of activity
+    labels. The page uses these to tailor team-specific UI:
+
+    - Only Bamawl Team's export consumes a task's buffer hours, so the
+      editable Buffer field is shown only for teams whose export uses it
+      (see BUFFER_EXPORT_TEAMS in preview.html).
+    - SGL/SSD tasks must have exactly the template's phase columns as
+      their activities (an activity whose name isn't a template phase
+      has no column to export into, so its hours would silently drop).
+      Passing FIXED_PHASES lets the page normalize every task to that
+      set, drop the free-text "Add Activity", and auto-fill new tasks —
+      so the Preview can never produce an un-exportable activity.
+
     Returns:
         Rendered preview template.
     """
-    return render_template("preview.html")
+    team_name = _current_team_name() or ""
+    return render_template(
+        "preview.html",
+        team_name=team_name,
+        fixed_phases=_fixed_phases_for_team(team_name),
+    )
+
+
+def _current_team_name() -> str | None:
+    """Return the current session's team's name, or None if it can't be resolved."""
+    from repositories.team_repository import TeamRepository
+
+    team = TeamRepository(current_app.config["MHES_DB_PATH"]).get_by_id(session["team_id"])
+    return team["name"] if team is not None else None
+
+
+def _fixed_phases_for_team(team_name: str) -> list[str]:
+    """The team's export-template fixed phase labels, or [] for teams
+    whose export has no fixed phase set (Bamawl/KiKan/default, whose
+    activities are free-form). Resolved from the same template the
+    team's export builder uses, so Preview and export always agree on
+    the phase set. A missing/unreadable template yields [] (Preview
+    then leaves activities free-form rather than guessing)."""
+    root = current_app.root_path
+    if team_name == "SGL Team":
+        from services.sgl_export_builder import SglExportBuilder
+        return SglExportBuilder.fixed_phase_labels(root)
+    if team_name == "SSD Team":
+        from services.ssd_export_builder import SsdExportBuilder
+        return SsdExportBuilder.fixed_phase_labels(root)
+    return []
 
 
 @preview_bp.route("/temp", methods=["GET"])
