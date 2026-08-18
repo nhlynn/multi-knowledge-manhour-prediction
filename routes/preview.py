@@ -89,6 +89,7 @@ def preview_page() -> str:
         "preview.html",
         team_name=team_name,
         fixed_phases=_fixed_phases_for_team(team_name),
+        phase_formula=_phase_formula_for_team(team_name),
     )
 
 
@@ -101,12 +102,19 @@ def _current_team_name() -> str | None:
 
 
 def _fixed_phases_for_team(team_name: str) -> list[str]:
-    """The team's export-template fixed phase labels, or [] for teams
-    whose export has no fixed phase set (Bamawl/KiKan/default, whose
-    activities are free-form). Resolved from the same template the
-    team's export builder uses, so Preview and export always agree on
-    the phase set. A missing/unreadable template yields [] (Preview
-    then leaves activities free-form rather than guessing)."""
+    """The team's export fixed phase labels, or [] for teams whose
+    export has no fixed phase set (Bamawl/default, whose activities are
+    free-form). Resolved from the same source the team's export builder
+    uses, so Preview and export always agree on the phase set:
+
+    - SGL/SSD read the labels from their export template's phase columns.
+    - KiKan reads them from its DB column-mapping's ``phase_columns``
+      (its export matches activities to those fixed columns by label, so
+      an activity whose name isn't one of them has nowhere to export to).
+
+    A missing/unreadable source yields [] (Preview then leaves
+    activities free-form rather than guessing).
+    """
     root = current_app.root_path
     if team_name == "SGL Team":
         from services.sgl_export_builder import SglExportBuilder
@@ -114,7 +122,130 @@ def _fixed_phases_for_team(team_name: str) -> list[str]:
     if team_name == "SSD Team":
         from services.ssd_export_builder import SsdExportBuilder
         return SsdExportBuilder.fixed_phase_labels(root)
+    if team_name == "KiKan Team":
+        return _kikan_fixed_phases()
     return []
+
+
+def _kikan_fixed_phases() -> list[str]:
+    """KiKan Team's fixed phase labels, read from its configured
+    column-mapping's ``phase_columns`` — the exact set its export writes
+    (see services/kikan_export_builder.py's ``_phase_value``). [] if the
+    mapping isn't seeded yet."""
+    from services.kikan_export_builder import KikanExportBuilder
+
+    try:
+        mapping = KikanExportBuilder.resolve_column_mapping(
+            current_app.config["MHES_DB_PATH"], session["team_id"],
+        )
+    except Exception:
+        return []
+    if not mapping:
+        return []
+    labels = []
+    for phase in mapping.get("phase_columns", []):
+        label = (phase or {}).get("label")
+        if label and str(label).strip():
+            labels.append(str(label).strip())
+    return labels
+
+
+# KiKan Team's per-phase auto-calculation, mirroring the coefficients and
+# base references hard-coded in its Excel template's 工数詳細 sheet (row 2
+# coefficients + the row-5 formulas). Only 実装工数/Development is entered
+# by hand; every other phase is derived from it (or from another derived
+# phase), so Preview can make Development the single editable field and
+# recompute the rest exactly as the workbook would. The list order is
+# dependency-safe: each phase's inputs appear before it (Review needs Test
+# Specification; Management needs Review). If KiKan's template changes its
+# coefficients or formula shape, update this to match.
+_KIKAN_PHASE_FORMULA = {
+    "base": "Development",  # 実装工数 (h) — the only editable phase
+    "derived": [
+        {"label": "Code Review",         "of": ["Development"], "coef": 0.10},   # =F*0.1
+        {"label": "Spec Understanding",  "of": ["Development"], "coef": 0.10},   # =F*0.1
+        {"label": "QA",                  "of": ["Development"], "coef": 0.05},   # =F*0.05
+        {"label": "Test Specification",  "of": ["Development"], "coef": 0.30},   # =F*0.3
+        {"label": "Review",              "of": ["Test Specification"], "coef": 0.15},  # =J*0.15
+        {"label": "Implementation",      "of": ["Development"], "coef": 0.30},   # =F*0.3
+        {"label": "Test Data Creation",  "of": ["Development"], "coef": 0.10},   # =F*0.1
+        {"label": "Accidental Work",     "of": ["Development"], "coef": 0.02},   # =F*0.02
+        # =(F+H+J+L)*0.03 — Development + Spec Understanding + Test Spec + Implementation
+        {"label": "Risk", "of": ["Development", "Spec Understanding", "Test Specification", "Implementation"], "coef": 0.03},
+        # =SUM(F:M)*0.05 — Development through Test Data Creation (8 phases, excludes Accidental/Risk/Management)
+        {"label": "Management Manhours", "of": ["Development", "Code Review", "Spec Understanding", "QA", "Test Specification", "Review", "Implementation", "Test Data Creation"], "coef": 0.05},
+    ],
+}
+
+
+def _phase_formula_for_team(team_name: str):
+    """The team's per-phase auto-calculation spec (base phase + derived
+    phases with their input phases and coefficient), or None for teams
+    with no such formula. KiKan and Bamawl both derive every phase from
+    a single Development input; Preview uses this to make Development the
+    only editable phase and compute the rest."""
+    if team_name == "KiKan Team":
+        return _KIKAN_PHASE_FORMULA
+    if team_name == "Bamawl Team":
+        return _BAMAWL_PHASE_FORMULA
+    return None
+
+
+# Bamawl Team's per-phase auto-calculation, mirroring the coefficients
+# and formulas in its Excel template's ALL_Detail sheet (row-2
+# coefficients + row-5 formulas). Only D/Development man-hours is entered
+# by hand; every other phase is derived from it (or from another derived
+# phase — e.g. DB Design Review←DB Design←ERD←Development). Labels are
+# Bamawl's config phase-column labels (unique, unlike the sheet's
+# repeated column headers). List order is dependency-safe. If Bamawl's
+# template changes its coefficients/shape, update this to match.
+# NB: the template's リスク cell has a stray "AA47" reference (an empty
+# cell = 0); it's intentionally omitted here as it contributes nothing.
+_BAMAWL_PHASE_FORMULA = {
+    "base": "Development",
+    "derived": [
+        {"label": "Code Review",                  "of": ["Development"], "coef": 0.07},
+        {"label": "Prototype",                    "of": ["Development"], "coef": 0.15},
+        {"label": "Prototype Review",             "of": ["Prototype"], "coef": 0.05},
+        {"label": "Business Flow",                "of": ["Development"], "coef": 0.04},
+        {"label": "Business Flow Review",         "of": ["Business Flow"], "coef": 0.20},
+        {"label": "ERD",                          "of": ["Development"], "coef": 0.03},
+        {"label": "ERD Review",                   "of": ["ERD"], "coef": 0.02},
+        {"label": "DFD",                          "of": ["Development"], "coef": 0.0},
+        {"label": "DFD Review",                   "of": ["DFD"], "coef": 0.0},
+        {"label": "DB Design",                    "of": ["ERD"], "coef": 0.20},
+        {"label": "DB Design Review",             "of": ["DB Design"], "coef": 0.20},
+        {"label": "Screen/Form/Function",         "of": ["Development"], "coef": 0.40},
+        {"label": "Screen/Form/Function Review",  "of": ["Screen/Form/Function"], "coef": 0.15},
+        {"label": "Unit Test Specification",      "of": ["Screen/Form/Function"], "coef": 0.70},
+        {"label": "Unit Test Review",             "of": ["Unit Test Specification"], "coef": 0.15},
+        {"label": "Unit Test Implementation",     "of": ["Development"], "coef": 0.40},
+        {"label": "Combined Test Specification",  "of": ["Screen/Form/Function"], "coef": 0.35},
+        {"label": "Combined Test Review",         "of": ["Combined Test Specification"], "coef": 0.25},
+        {"label": "Combined Test Implementation", "of": ["Development"], "coef": 0.40},
+        {"label": "Comprehensive Test Implementation", "of": ["Development"], "coef": 0.25},
+        {"label": "Test Data Creation",           "of": ["Development"], "coef": 0.0},
+        {"label": "User Manual",                  "of": ["Development"], "coef": 0.05},
+        {"label": "Accidental Work",              "of": ["Development"], "coef": 0.05},
+        {"label": "Risk", "of": [
+            "Development", "Business Flow", "ERD", "DFD", "DB Design",
+            "Screen/Form/Function", "Unit Test Specification",
+            "Combined Test Specification", "Combined Test Implementation",
+            "Prototype", "Comprehensive Test Implementation",
+        ], "coef": 0.05},
+        {"label": "Management Manhours", "of": [
+            "Development", "Code Review", "Prototype", "Prototype Review",
+            "Business Flow", "Business Flow Review", "ERD", "ERD Review",
+            "DFD", "DFD Review", "DB Design", "DB Design Review",
+            "Screen/Form/Function", "Screen/Form/Function Review",
+            "Unit Test Specification", "Unit Test Review",
+            "Unit Test Implementation", "Combined Test Specification",
+            "Combined Test Review", "Combined Test Implementation",
+            "Comprehensive Test Implementation", "Test Data Creation",
+            "User Manual",
+        ], "coef": 0.15},
+    ],
+}
 
 
 @preview_bp.route("/temp", methods=["GET"])

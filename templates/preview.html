@@ -193,6 +193,11 @@
         border-bottom: 1.5px dashed #cbd5e1; border-radius: 0;
         padding: 0 2px; font-weight: 700; color: #1e293b; font-size: 0.875rem;
     }
+    /* Read-only derived phase (KiKan auto-calculated from Development) */
+    .act-est-derived {
+        display: inline-block; min-width: 2.75rem; text-align: right;
+        padding: 0 2px; font-weight: 500; color: #94a3b8; font-size: 0.875rem;
+    }
     .act-est-input:hover { background: #fef9c3 !important; border-radius: 3px; border-bottom-color: transparent; }
     .act-est-input:focus {
         background: #fff !important; border-radius: 3px; border-bottom: none;
@@ -351,7 +356,13 @@
     // is just noise. Today only Bamawl Team's export uses buffer —
     // KiKan/SGL write =SUM(phase columns) and SSD has no buffer concept.
     var TEAM_NAME = {{ team_name|tojson }};
-    var BUFFER_EXPORT_TEAMS = ['Bamawl Team'];
+    // No team's export consumes a task's buffer hours anymore (each
+    // team's Total is just the sum of its phase columns), so the
+    // editable Buffer field is hidden everywhere — showing it would be
+    // noise that changes nothing on export. Kept as a list (not a flat
+    // false) so a future team that genuinely uses buffer can be
+    // re-enabled here without reworking the call sites.
+    var BUFFER_EXPORT_TEAMS = [];
     function bufferApplies() {
         return BUFFER_EXPORT_TEAMS.indexOf(TEAM_NAME) !== -1;
     }
@@ -368,16 +379,97 @@
     var FIXED_PHASES = {{ fixed_phases|tojson }};
     function hasFixedPhases() { return Array.isArray(FIXED_PHASES) && FIXED_PHASES.length > 0; }
 
-    // Only SSD Team's phases carry the 標準/調整/見積 (standard/adjustment/
-    // estimate) breakdown — SGL's fixed phases are a single 見積 value
-    // each, so it must NOT get the breakdown columns or breakdown fields.
+    // Per-phase auto-calculation spec (KiKan only), injected server-side.
+    // { base: '<phase>', derived: [{label, of:[...], coef}] } — only the
+    // base phase (Development) is editable; every derived phase is
+    // recomputed as sum(of) * coef whenever the base changes, exactly as
+    // the KiKan workbook's own formulas do. null for teams with no such
+    // formula (their phases are all independently editable).
+    var PHASE_FORMULA = {{ phase_formula|tojson }};
+    function hasPhaseFormula() { return PHASE_FORMULA && PHASE_FORMULA.base && (PHASE_FORMULA.derived || []).length > 0; }
+
+    // Phases whose formula coefficient is 0 are ALWAYS 0h no matter what
+    // Development is (e.g. Bamawl's DFD / DFD Review / Test Data
+    // Creation) — structural dead columns that only add noise in the UI.
+    // Collect their (normalized) names so they can be hidden from the
+    // preview while still being written to the export as 0.
+    var _ZERO_PHASES = {};
+    (function() {
+        if (!PHASE_FORMULA || !PHASE_FORMULA.derived) return;
+        PHASE_FORMULA.derived.forEach(function(d) {
+            if (!d.coef) _ZERO_PHASES[_norm(d.label)] = true;
+        });
+    })();
+    function phaseIsAlwaysZero(label) { return _ZERO_PHASES[_norm(label)] === true; }
+    function phaseIsEditable(label) {
+        // With a phase formula, only the base phase is editable; without
+        // one, every phase's estimate is editable as before.
+        if (!hasPhaseFormula()) return true;
+        return _norm(label) === _norm(PHASE_FORMULA.base);
+    }
+    function _norm(s) { return String(s || '').replace(/\s+/g, '').toLowerCase(); }
+
+    function applyPhaseFormula(task) {
+        // Recompute every derived phase of one task from its base phase,
+        // in the spec's dependency-safe order. No-op if this team has no
+        // formula. Matches phases by name (whitespace/case-insensitive).
+        if (!hasPhaseFormula()) return;
+        var acts = task.activities || [];
+        var byName = {};
+        acts.forEach(function(a) { byName[_norm(a.task_detail)] = a; });
+        var val = function(label) {
+            var a = byName[_norm(label)];
+            return a ? (parseFloat(a.estimate_hours) || 0) : 0;
+        };
+        PHASE_FORMULA.derived.forEach(function(d) {
+            var target = byName[_norm(d.label)];
+            if (!target) return;
+            var sum = 0;
+            d.of.forEach(function(o) { sum += val(o); });
+            target.estimate_hours = Math.round(sum * d.coef * 100) / 100;
+        });
+    }
+
+    // A team with a phase formula inherently has a FIXED phase set — the
+    // base phase plus every derived phase — so if the server didn't
+    // already provide FIXED_PHASES (it does for SGL/SSD/KiKan, not for
+    // Bamawl), derive it from the formula. This gives every formula team
+    // the same fixed-phase treatment: normalized rows, no free-text Add
+    // Activity, read-only phase names — so a rename/add can't desync the
+    // formula's name matching.
+    if (hasPhaseFormula() && !hasFixedPhases()) {
+        FIXED_PHASES = [PHASE_FORMULA.base].concat(
+            PHASE_FORMULA.derived.map(function(d) { return d.label; })
+        );
+    }
+
+    // Only SSD-style phases carry the 標準/調整/見積 breakdown; SGL's
+    // fixed phases are a single 見積 value each, so SGL must NOT get the
+    // breakdown columns/fields. Detected primarily from the DATA — does
+    // the loaded (pre-normalize) knowledge actually carry per-phase
+    // standard/adjustment hours — so it works regardless of the exact
+    // team name; the name list is only a fallback for an empty/manual
+    // preview that has no rows to inspect yet.
     var BREAKDOWN_TEAMS = ['SSD Team'];
-    function teamUsesBreakdown() { return BREAKDOWN_TEAMS.indexOf(TEAM_NAME) !== -1; }
+    var RAW_HAS_BREAKDOWN = false;  // computed once categories is loaded, below
+    function teamUsesBreakdown() {
+        return RAW_HAS_BREAKDOWN || BREAKDOWN_TEAMS.indexOf(TEAM_NAME) !== -1;
+    }
 
     var raw = sessionStorage.getItem('previewData');
     var data;
     try { data = JSON.parse(raw || '{}'); } catch(e) { data = {}; }
     var categories = data.categories || [];
+
+    // Capture whether the RAW (pre-normalize) data carries the 標準/調整
+    // breakdown, before normalizeFixedPhases can add any such fields.
+    RAW_HAS_BREAKDOWN = categories.some(function(cat) {
+        return (cat.tasks || []).some(function(t) {
+            return (t.activities || []).some(function(a) {
+                return a.standard_hours !== undefined || a.adjustment_hours !== undefined;
+            });
+        });
+    });
 
     // Project Name persistence
     var projectNameInput = document.getElementById('projectName');
@@ -407,6 +499,11 @@
 
     // Initial render
     normalizeFixedPhases(categories);
+    if (hasPhaseFormula()) {
+        categories.forEach(function(cat) {
+            (cat.tasks || []).forEach(function(t) { applyPhaseFormula(t); });
+        });
+    }
     if (categories.length === 0) {
         showEmpty();
     } else {
@@ -504,15 +601,29 @@
         // and fill any missing phase with 0 — so a chat-selected task
         // that only carried some phases still shows/exports the full set.
         // Missing phases get breakdown fields (標準/調整) only for teams
-        // that use them (SSD); SGL's filled phases are estimate-only, so
-        // its rows never sprout empty 標準/調整 columns.
+        // that use them (SSD); SGL/KiKan filled phases are estimate-only.
+        //
+        // SAFETY: if a task's existing activities have real hours but
+        // match NONE of FIXED_PHASES (a label mismatch — e.g. the export
+        // config's labels differ from the imported activity names), the
+        // task is left untouched rather than wiping its hours to a set
+        // of zeroed phases. Better to preserve real data than force a
+        // set that wouldn't have matched on export anyway.
         if (!hasFixedPhases()) return;
         var withBreakdown = teamUsesBreakdown();
         var norm = function(s) { return String(s || '').replace(/\s+/g, '').toLowerCase(); };
+        var fixedSet = {};
+        FIXED_PHASES.forEach(function(p) { fixedSet[norm(p)] = true; });
         cats.forEach(function(cat) {
             (cat.tasks || []).forEach(function(t) {
+                var acts = t.activities || [];
+                var anyMatch = acts.some(function(a) { return fixedSet[norm(a.task_detail)]; });
+                var hasRealHours = acts.some(function(a) {
+                    return Math.abs(parseFloat(a.estimate_hours) || 0) > 0.0001;
+                });
+                if (!anyMatch && hasRealHours) return;  // preserve un-matchable real data
                 var existing = {};
-                (t.activities || []).forEach(function(a) { existing[norm(a.task_detail)] = a; });
+                acts.forEach(function(a) { existing[norm(a.task_detail)] = a; });
                 t.activities = FIXED_PHASES.map(function(p) {
                     var a = existing[norm(p)];
                     if (a) { a.task_detail = p; return a; }
@@ -685,6 +796,12 @@
 
                 // Activity rows
                 task.activities.forEach(function(act, ai) {
+                    // Skip always-zero phases (formula coef = 0, e.g.
+                    // Bamawl's DFD / DFD Review / Test Data Creation):
+                    // hidden from the UI as noise, but left in the task's
+                    // data so export still writes their 0 in the right
+                    // column.
+                    if (phaseIsAlwaysZero(act.task_detail)) return;
                     // SSD Team's per-phase 標準 / 調整 / 見積 breakdown renders as
                     // three aligned, labelled cells (標準 and 調整 read-only, 見積
                     // editable). Other teams (no breakdown fields) keep the
@@ -702,9 +819,15 @@
                                 '</span>' +
                             '</div>';
                     } else {
+                        // Under a phase formula (KiKan), only the base
+                        // phase (Development) is editable; derived phases
+                        // are read-only, recomputed from the base.
+                        var editable = phaseIsEditable(act.task_detail);
                         hoursHtml =
                             '<div class="d-flex align-items-center gap-1 act-hours-col justify-content-end">' +
-                                '<span class="editable act-est-input" contenteditable="true" data-field="act_estimate" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '">' + fmt2(act.estimate_hours) + '</span>' +
+                                (editable
+                                    ? '<span class="editable act-est-input" contenteditable="true" data-field="act_estimate" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '">' + fmt2(act.estimate_hours) + '</span>'
+                                    : '<span class="act-est-derived" data-sum="act" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '">' + fmt2(act.estimate_hours) + '</span>') +
                                 '<span class="act-h-label">h</span>' +
                             '</div>';
                     }
@@ -867,6 +990,17 @@
                 act.adjustment_hours = num - std;
                 var adjEl = document.querySelector('.act-hours-group[data-ci="' + ci + '"][data-ti="' + ti + '"][data-ai="' + ai + '"] .act-adj-val');
                 if (adjEl) adjEl.textContent = fmt2(act.adjustment_hours);
+            }
+            // For KiKan's phase formula, editing the base phase
+            // (Development) recomputes every derived phase; refresh their
+            // read-only cells in the DOM without a full re-render.
+            if (hasPhaseFormula() && phaseIsEditable(act.task_detail)) {
+                var task = categories[ci].tasks[ti];
+                applyPhaseFormula(task);
+                task.activities.forEach(function(a, idx) {
+                    var cell = document.querySelector('.act-est-derived[data-ci="' + ci + '"][data-ti="' + ti + '"][data-ai="' + idx + '"]');
+                    if (cell) cell.textContent = fmt2(a.estimate_hours);
+                });
             }
             recalcTask(ci, ti);
         }

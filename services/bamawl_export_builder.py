@@ -644,24 +644,13 @@ def build_bamawl_workbook(
                 ws.cell(row=row, column=col_idx, value=value)
                 activities_sum += value
 
-        # The row's own Total(h) cell uses the task's real total
-        # (estimate + buffer, exactly what Preview's Grand Total sums)
-        # rather than re-deriving it from just the phase columns above
-        # -- those two only agree when a task's buffer is 0. Using
-        # task_total here is what makes this workbook's built-in
-        # TotalManhour sum (=ALL_Detail!AD15=SUM(AD5:AD14)) match
-        # Preview's Grand Total exactly, buffer included.
-        task_total = _safe_float(task.get("total_hours", activities_sum))
+        # The row's Total(h) cell is just the sum of this task's phase
+        # columns — the same thing the template's own =SUM(D:AC) formula
+        # would produce. Bamawl has no buffer concept (its estimate IS
+        # the total), so nothing extra is added; the workbook's built-in
+        # TotalManhour sum (=ALL_Detail!AD15=SUM(AD5:AD14)) stays correct.
         if total_col:
-            ws.cell(row=row, column=total_col, value=task_total)
-
-        if abs(task_total - activities_sum) > 0.01:
-            logger.info(
-                "Bamawl export: task %r total_hours (%.2f) differs from its phase "
-                "columns' sum (%.2f) -- likely buffer hours or an unmatched "
-                "activity; the row's Total(h) cell uses total_hours.",
-                task.get("task", ""), task_total, activities_sum,
-            )
+            ws.cell(row=row, column=total_col, value=activities_sum)
 
         row += 1
 
