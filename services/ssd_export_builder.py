@@ -2,12 +2,15 @@
 
 Independent from the Bamawl/KiKan/SGL builders — no shared code beyond
 the generic helpers already in ``services/excel_parser.py`` and the
-shared ``BaseExportService`` interface. Built on top of SSD Team's real
-internal Excel workbook,
-``simple_resource/ssd_import_export_format.xlsx`` — every export copies
-that workbook, populates the copy, and saves the copy to the export
-path; the real template is never modified, and the sanitized public
-sample (``import/ssd/ssd_import_template.xlsx``) is never read here.
+shared ``BaseExportService`` interface. Built on top of the git-tracked
+sanitized sample workbook,
+``import/ssd/ssd_import_template.xlsx`` — the same public file Template
+Download serves and import validation accepts, structurally identical
+(sanitization only blanks sample cell data) to SSD Team's real internal
+workbook. Every export copies that sample, populates the copy, and
+saves the copy to the export path; the template file is never modified.
+The real customer workbook under ``simple_resource/`` (git-ignored) is
+no longer read anywhere at runtime, so export works on a clean checkout.
 
 Design — why SSD needs its own builder:
 
@@ -432,12 +435,18 @@ class SsdExportBuilder(BaseExportService):
 
     @staticmethod
     def template_path(app_root_path: str) -> str:
-        """Path to SSD Team's real internal Excel template — the export
-        base. Import validation and Template Download instead use the
-        sanitized public copy (import/ssd/ssd_import_template.xlsx);
-        export always copies the real workbook, never the sanitized one.
+        """Path to SSD Team's export base template.
+
+        Returns the git-tracked sanitized sample template
+        ``import/ssd/ssd_import_template.xlsx`` -- the same public file
+        Template Download serves and import validation accepts. It
+        shares the exact sheet/column STRUCTURE of SSD Team's real
+        internal workbook (sanitization only blanks sample cell data),
+        so export produces the correct numbers/tasks. The real customer
+        workbook under ``simple_resource/`` (git-ignored) is no longer
+        read anywhere at runtime, so export works on a clean checkout.
         """
-        return os.path.join(app_root_path, "simple_resource", "ssd_import_export_format.xlsx")
+        return os.path.join(app_root_path, "import", "ssd", "ssd_import_template.xlsx")
 
     @staticmethod
     def fixed_phase_labels(app_root_path: str) -> list[str]:
@@ -447,30 +456,26 @@ class SsdExportBuilder(BaseExportService):
         a non-matching activity (which would have no column to export
         into) can never be added.
 
-        Reads the real internal template if present, else falls back to
-        the sanitized sample committed at import/ssd/ssd_import_template.xlsx
-        — both share the same column STRUCTURE, so the phase labels are
-        identical. This keeps Preview's fixed phases working on
-        deployments where the (customer) real template isn't checked in.
-        Returns [] only if neither can be read."""
-        candidates = [
-            SsdExportBuilder.template_path(app_root_path),
-            os.path.join(app_root_path, "import", "ssd", "ssd_import_template.xlsx"),
-        ]
-        for path in candidates:
-            if not os.path.isfile(path):
-                continue
+        Reads the same git-tracked sample template ``template_path``
+        now points at (``import/ssd/ssd_import_template.xlsx``) -- it
+        shares the same column STRUCTURE as SSD Team's real internal
+        workbook (sanitization only blanks data), so the phase labels
+        are identical. This keeps Preview's fixed phases working on a
+        clean checkout where ``simple_resource/`` (the customer
+        workbook) isn't present. Returns [] only if the template can't
+        be read."""
+        path = SsdExportBuilder.template_path(app_root_path)
+        if os.path.isfile(path):
             try:
                 wb = openpyxl.load_workbook(path)
-                if SSD_DETAIL_SHEET not in wb.sheetnames:
-                    continue
-                ws = wb[SSD_DETAIL_SHEET]
-                cols = _resolve_field_columns(ws)
-                labels = [label for label, _ in _resolve_group_columns(ws, cols, _ESTIMATE_GROUP_HEADER)]
-                if labels:
-                    return labels
+                if SSD_DETAIL_SHEET in wb.sheetnames:
+                    ws = wb[SSD_DETAIL_SHEET]
+                    cols = _resolve_field_columns(ws)
+                    labels = [label for label, _ in _resolve_group_columns(ws, cols, _ESTIMATE_GROUP_HEADER)]
+                    if labels:
+                        return labels
             except Exception:
-                continue
+                pass
         return []
 
     def build(self, context: ExportContext) -> None:

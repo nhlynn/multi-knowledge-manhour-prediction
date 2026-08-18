@@ -2,12 +2,15 @@
 
 Unlike the generic export path (``services/export_workbook_service.py``,
 which builds a fresh workbook from scratch via a column-layout config),
-Bamawl Team's export is built directly on top of Bamawl Team's single
-official Excel workbook (``simple_resource/bamawl_import_export_format_filled.xlsx``)
--- the same file (identical structure -- same 7 worksheets, same
-``ALL_Detail`` layout) used on the import side by
-``services/team_template_validator.py``. There is deliberately no separate
-import-only or export-only template file:
+Bamawl Team's export is built directly on top of the git-tracked
+sanitized sample workbook (``import/bamawl/bamawl_import_template.xlsx``)
+-- the same public file Template Download serves and
+``services/team_template_validator.py`` accepts on the import side, and
+structurally identical (same 7 worksheets, same ``ALL_Detail`` layout)
+to Bamawl Team's real internal workbook. The real customer workbook
+under ``simple_resource/`` (git-ignored) is no longer read anywhere at
+runtime, so export works on a clean checkout. There is deliberately no
+separate import-only or export-only template file:
 
 - The template workbook is loaded as-is and saved back out — every
   worksheet (``ReqDefinition``, ``FunctionList``, ``TotalManhour``,
@@ -555,10 +558,10 @@ def build_bamawl_workbook(
         column_mapping: Bamawl Team's configured phases-mode column
             mapping (``sheet``, ``header_row``, ``task_column``,
             ``id_column``, ``phase_columns``, ``total_column``).
-        template_path: Path to Bamawl Team's single official template
-            workbook (``simple_resource/bamawl_import_export_format_filled.xlsx``
-            -- see ``routes/export.py::_bamawl_template_path``), the
-            same file used on the import side.
+        template_path: Path to Bamawl Team's export base template
+            (``import/bamawl/bamawl_import_template.xlsx`` -- see
+            ``BamawlExportBuilder.template_path``), the git-tracked
+            sanitized sample also used on the import side.
         project_name: The Preview page's Project Name field, used
             verbatim to replace ``ReqDefinition``'s title cell. None or
             empty leaves that cell blank (see
@@ -711,16 +714,20 @@ class BamawlExportBuilder(BaseExportService):
 
     @staticmethod
     def template_path(app_root_path: str) -> str:
-        """Path to Bamawl Team's single official Excel template.
+        """Path to Bamawl Team's export base template.
 
-        ``bamawl_import_export_format_filled.xlsx`` is the one
-        workbook used for both import
-        (``services/team_template_validator.py`` accepts an upload
-        structurally matching it) and export (this builds directly on
-        top of it) -- there is deliberately no separate import-only or
-        export-only template file (see this module's own docstring).
+        Returns the git-tracked sanitized sample template
+        ``import/bamawl/bamawl_import_template.xlsx`` -- the same public
+        workbook Template Download serves and import validation accepts,
+        structurally identical (same 7 worksheets, same ``ALL_Detail``
+        layout) to Bamawl Team's real internal workbook; only pre-filled
+        sample cell *content* differs, which the exporter overwrites
+        anyway. Using it as the export base (the KiKan reference pattern)
+        means export works on a clean checkout: ``simple_resource/`` (the
+        real customer workbook, git-ignored) is no longer read anywhere
+        at runtime.
         """
-        return os.path.join(app_root_path, "simple_resource", "bamawl_import_export_format_filled.xlsx")
+        return os.path.join(app_root_path, "import", "bamawl", "bamawl_import_template.xlsx")
 
     def build(self, context: ExportContext) -> None:
         build_bamawl_workbook(
