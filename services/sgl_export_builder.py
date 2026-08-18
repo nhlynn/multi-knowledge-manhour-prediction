@@ -588,24 +588,37 @@ class SglExportBuilder(BaseExportService):
         correctly (an activity whose name isn't one of these has no
         column to write into, so its hours would silently drop). The
         Preview page uses this to fix each task's activity rows to this
-        set, so a user can never add a non-matching activity. Returns
-        [] if the template can't be read (Preview then falls back to
-        leaving activities editable)."""
-        path = SglExportBuilder.template_path(app_root_path)
-        if not os.path.isfile(path):
-            return []
-        try:
-            wb = openpyxl.load_workbook(path)
-            if SGL_SHEET_NAME not in wb.sheetnames:
-                return []
-            ws = wb[SGL_SHEET_NAME]
-            headers = _resolve_header_columns(ws)
-            group_col = headers.get(_PHASE_GROUP_HEADER)
-            if not group_col:
-                return []
-            return [label for label, _ in _resolve_phase_columns(ws, group_col)]
-        except Exception:
-            return []
+        set, so a user can never add a non-matching activity.
+
+        Reads the real internal template if present, else falls back to
+        the sanitized sample template committed at
+        import/sgl/sgl_import_template.xlsx — the two share the exact
+        same sheet/column STRUCTURE (sanitization only blanks data), so
+        the phase labels are identical. This keeps Preview's fixed
+        phases working on deployments where the (customer) real template
+        isn't checked in. Returns [] only if neither can be read."""
+        candidates = [
+            SglExportBuilder.template_path(app_root_path),
+            os.path.join(app_root_path, "import", "sgl", "sgl_import_template.xlsx"),
+        ]
+        for path in candidates:
+            if not os.path.isfile(path):
+                continue
+            try:
+                wb = openpyxl.load_workbook(path)
+                if SGL_SHEET_NAME not in wb.sheetnames:
+                    continue
+                ws = wb[SGL_SHEET_NAME]
+                headers = _resolve_header_columns(ws)
+                group_col = headers.get(_PHASE_GROUP_HEADER)
+                if not group_col:
+                    continue
+                labels = [label for label, _ in _resolve_phase_columns(ws, group_col)]
+                if labels:
+                    return labels
+            except Exception:
+                continue
+        return []
 
     def build(self, context: ExportContext) -> None:
         build_sgl_workbook(

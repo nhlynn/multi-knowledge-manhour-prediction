@@ -445,20 +445,33 @@ class SsdExportBuilder(BaseExportService):
         結合テスト), read from the 見積工数 group's sub-columns. The Preview
         page fixes each SSD task's activity rows to exactly this set, so
         a non-matching activity (which would have no column to export
-        into) can never be added. Returns [] if the template can't be
-        read."""
-        path = SsdExportBuilder.template_path(app_root_path)
-        if not os.path.isfile(path):
-            return []
-        try:
-            wb = openpyxl.load_workbook(path)
-            if SSD_DETAIL_SHEET not in wb.sheetnames:
-                return []
-            ws = wb[SSD_DETAIL_SHEET]
-            cols = _resolve_field_columns(ws)
-            return [label for label, _ in _resolve_group_columns(ws, cols, _ESTIMATE_GROUP_HEADER)]
-        except Exception:
-            return []
+        into) can never be added.
+
+        Reads the real internal template if present, else falls back to
+        the sanitized sample committed at import/ssd/ssd_import_template.xlsx
+        — both share the same column STRUCTURE, so the phase labels are
+        identical. This keeps Preview's fixed phases working on
+        deployments where the (customer) real template isn't checked in.
+        Returns [] only if neither can be read."""
+        candidates = [
+            SsdExportBuilder.template_path(app_root_path),
+            os.path.join(app_root_path, "import", "ssd", "ssd_import_template.xlsx"),
+        ]
+        for path in candidates:
+            if not os.path.isfile(path):
+                continue
+            try:
+                wb = openpyxl.load_workbook(path)
+                if SSD_DETAIL_SHEET not in wb.sheetnames:
+                    continue
+                ws = wb[SSD_DETAIL_SHEET]
+                cols = _resolve_field_columns(ws)
+                labels = [label for label, _ in _resolve_group_columns(ws, cols, _ESTIMATE_GROUP_HEADER)]
+                if labels:
+                    return labels
+            except Exception:
+                continue
+        return []
 
     def build(self, context: ExportContext) -> None:
         build_ssd_workbook(
