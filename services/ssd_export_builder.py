@@ -47,6 +47,7 @@ writes the primary one).
 import logging
 import os
 import re
+from datetime import date
 from typing import Any
 
 import openpyxl
@@ -55,6 +56,38 @@ from openpyxl.cell.cell import MergedCell
 from services.base_export_service import BaseExportService, ExportContext
 
 logger = logging.getLogger(__name__)
+
+# Japanese weekday abbreviations, Monday-first (date.weekday(): Mon=0).
+_JP_WEEKDAYS = ["月", "火", "水", "木", "金", "土", "日"]
+
+# The 最終更新 (last-updated) caption on each sheet, e.g.
+# "最終更新：2/27/2026（金）". On export its date is refreshed to today.
+# Matched loosely on the "最終更新" prefix so the stale template date and
+# weekday are fully replaced regardless of their old value/format.
+_LAST_UPDATED_RE = re.compile(r"^\s*最終更新")
+
+
+def _today_last_updated() -> str:
+    """"最終更新：M/D/YYYY（<曜>）" for today, matching the template's
+    own caption format (M/D/YYYY plus a Japanese weekday)."""
+    today = date.today()
+    wd = _JP_WEEKDAYS[today.weekday()]
+    return f"最終更新：{today.month}/{today.day}/{today.year}（{wd}）"
+
+
+def _refresh_last_updated(wb) -> int:
+    """Replace every sheet's 最終更新 caption with today's date. Returns
+    the number of cells updated. Skips merged non-anchor cells."""
+    stamp = _today_last_updated()
+    updated = 0
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and _LAST_UPDATED_RE.match(cell.value):
+                    if not isinstance(cell, MergedCell):
+                        cell.value = stamp
+                        updated += 1
+    return updated
 
 # Primary detail sheet written on export. The "…_2" second-proposal
 # sheet is intentionally left as the template has it.
@@ -105,6 +138,21 @@ def _resolve_field_columns(ws) -> dict[str, int]:
         for cell in ws[_FIELD_HEADER_ROW]
         if cell.value is not None and str(cell.value).strip()
     }
+
+
+def _resolve_work_note_column(ws, basis_col: int | None) -> int | None:
+    """Return the 工数説明 column — the second column of the 見積根拠
+    merged header (H5:I5). Located from that merge span, mirroring
+    services/ssd_import_parser.py; None if 見積根拠 isn't merged across
+    two columns."""
+    if not basis_col:
+        return None
+    for merged in ws.merged_cells.ranges:
+        if (merged.min_row == _FIELD_HEADER_ROW
+                and merged.min_col == basis_col
+                and merged.max_col > basis_col):
+            return merged.max_col
+    return None
 
 
 def _resolve_group_columns(ws, field_columns: dict[str, int], group_header: str) -> list[tuple[str, int]]:
@@ -201,6 +249,7 @@ def _set(ws, row: int, col: int | None, value) -> None:
 def _clear_task_row(
     ws, row: int, cols: dict[str, int],
     std_cols: list[tuple[str, int]], adj_cols: list[tuple[str, int]], est_cols: list[tuple[str, int]],
+    basis_col: int | None = None, work_note_col: int | None = None,
 ) -> None:
     """Blank every writable cell of a task row before any selected task
     is written, so an unused row can never retain the template's own
@@ -208,6 +257,8 @@ def _clear_task_row(
     for header in (_FUNC_NAME_HEADER, _FUNC_OVERVIEW_HEADER, _REQUIREMENT_HEADER,
                    _DIFFICULTY_HEADER, _KIND_HEADER, _BASIS_HEADER):
         _set(ws, row, cols.get(header), None)
+    _set(ws, row, basis_col, None)
+    _set(ws, row, work_note_col, None)
     for _, col in (*std_cols, *adj_cols, *est_cols):
         _set(ws, row, col, None)
 
@@ -273,6 +324,11 @@ def build_ssd_workbook(
     first_std_col = std_cols[0][1] if std_cols else None
     first_est_col = est_cols[0][1] if est_cols else None
 
+    # 見積根拠 (H) and its second merged column 工数説明 (I). Written back
+    # so a re-exported row carries the full column set the original had.
+    basis_col = cols.get(_BASIS_HEADER)
+    work_note_col = _resolve_work_note_column(ws, basis_col)
+
     rows_by_category = _discover_task_rows_by_category(
         ws, func_name_col, first_std_col, first_est_col,
     )
@@ -286,7 +342,7 @@ def build_ssd_workbook(
     # keep sample/previous data.
     for rows in rows_by_category.values():
         for row in rows:
-            _clear_task_row(ws, row, cols, std_cols, adj_cols, est_cols)
+            _clear_task_row(ws, row, cols, std_cols, adj_cols, est_cols, basis_col, work_note_col)
 
     std_by_label = {label: col for label, col in std_cols}
     adj_by_label = {label: col for label, col in adj_cols}
@@ -309,6 +365,7 @@ def build_ssd_workbook(
             _write_task(
                 ws, row, task, cols,
                 std_by_label, adj_by_label, est_by_label,
+                basis_col, work_note_col,
             )
 
     # 見積総額 project title (a literal string cell; its hour/amount cells
@@ -318,6 +375,11 @@ def build_ssd_workbook(
         title_cell = summary[SSD_SUMMARY_TITLE_CELL]
         if not isinstance(title_cell, MergedCell):
             title_cell.value = project_name
+
+    # Stamp every sheet's 最終更新 caption with today's date, so the
+    # exported file reflects when it was actually produced rather than
+    # the template's stale hardcoded date.
+    _refresh_last_updated(wb)
 
     wb.save(filepath)
     logger.info(
@@ -329,6 +391,7 @@ def build_ssd_workbook(
 def _write_task(
     ws, row: int, task: dict[str, Any], cols: dict[str, int],
     std_by_label: dict[str, int], adj_by_label: dict[str, int], est_by_label: dict[str, int],
+    basis_col: int | None = None, work_note_col: int | None = None,
 ) -> None:
     """Write one task into ``row``: its descriptive fields plus all
     three phase hour groups as literal values from the task's own
@@ -338,6 +401,11 @@ def _write_task(
     _set(ws, row, cols.get(_REQUIREMENT_HEADER), task.get("requirement", "") or None)
     _set(ws, row, cols.get(_DIFFICULTY_HEADER), task.get("difficulty", "") or None)
     _set(ws, row, cols.get(_KIND_HEADER), task.get("kind", "") or None)
+    # 見積根拠 and 工数説明 (I column) — the estimate-basis and hours-note
+    # free text, so a re-exported row carries the full column set the
+    # original had, not just name/hours.
+    _set(ws, row, basis_col, task.get("basis", "") or None)
+    _set(ws, row, work_note_col, task.get("work_note", "") or None)
 
     # Per-phase hours from the task's activities. The Preview payload
     # calls this list "activities" (built by search_service); the raw

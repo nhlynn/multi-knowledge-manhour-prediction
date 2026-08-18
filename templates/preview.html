@@ -200,6 +200,24 @@
     }
     .act-h-label { font-size: 0.7rem; color: #94a3b8; font-weight: 500; }
 
+    /* SSD Team's per-phase 標準 / 調整 / 見積 breakdown — three aligned,
+       labelled cells that never wrap (fixes the cramped vertical caption). */
+    .act-hours-group {
+        display: flex; align-items: flex-end; gap: 1.1rem;
+        flex-shrink: 0; white-space: nowrap;
+    }
+    .act-hcell {
+        display: flex; flex-direction: column; align-items: flex-end;
+        min-width: 2.4rem; line-height: 1.2;
+    }
+    .act-hcap {
+        font-size: 0.62rem; color: #94a3b8; font-weight: 600;
+        letter-spacing: 0.02em; text-transform: none;
+    }
+    .act-hval { font-size: 0.85rem; color: #64748b; font-weight: 500; }
+    .act-hcell-est .act-hcap { color: #6366f1; }
+    .act-hcell-est .act-est-input { font-size: 0.95rem; font-weight: 700; }
+
     /* ── Grand totals panel ── */
     .totals-panel {
         background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
@@ -400,17 +418,7 @@
         categories.push({
             category: 'New Category',
             source: 'Manual',
-            tasks: [{
-                task: 'New Task',
-                estimate_hours: 0,
-                buffer_hours: 0,
-                total_hours: 0,
-                remarks: '',
-                activities: [{
-                    task_detail: 'New Activity',
-                    estimate_hours: 0
-                }]
-            }]
+            tasks: [makeNewTask()]
         });
         saveData();
         showContent();
@@ -420,6 +428,47 @@
         renderSummary();
         renderBody();
         renderFooter();
+    }
+
+    // SSD Team's fixed phase set — every SSD task has exactly these
+    // four activities, mapped to the template's 標準/調整/見積 columns.
+    var SSD_PHASES = ['詳細設計', '実装', '単体テスト', '結合テスト'];
+
+    function makeNewTask() {
+        // In an SSD preview (breakdown present), a new task must carry
+        // the same fixed four phases with the 標準/調整/見積 breakdown
+        // fields, so it renders and exports like every other SSD task
+        // (fixed phases, no buffer, no Add Activity). Other teams get a
+        // single blank activity as before.
+        if (previewHasBreakdown()) {
+            return {
+                task: 'New Task',
+                estimate_hours: 0, buffer_hours: 0, total_hours: 0,
+                difficulty: '', remarks: '',
+                activities: SSD_PHASES.map(function(p) {
+                    return { task_detail: p, estimate_hours: 0, standard_hours: 0, adjustment_hours: 0 };
+                })
+            };
+        }
+        return {
+            task: 'New Task',
+            estimate_hours: 0, buffer_hours: 0, total_hours: 0, remarks: '',
+            activities: [{ task_detail: 'New Activity', estimate_hours: 0 }]
+        };
+    }
+
+    function previewHasBreakdown() {
+        // True when this preview is SSD Team's data — any task carrying
+        // a per-phase 標準/調整 breakdown. Such data has no buffer
+        // concept, so the Buffer stat is hidden from the summary and
+        // footer (it would always read 0 and only add noise).
+        return categories.some(function(cat) {
+            return (cat.tasks || []).some(function(t) {
+                return (t.activities || []).some(function(a) {
+                    return a.standard_hours !== undefined || a.adjustment_hours !== undefined;
+                });
+            });
+        });
     }
 
     function renderSummary() {
@@ -433,8 +482,18 @@
             });
         });
 
-        document.getElementById('previewSummary').innerHTML =
-            '<div class="summary-strip">' +
+        var hideBuffer = previewHasBreakdown();
+        var summaryInner;
+        if (hideBuffer) {
+            // SSD: Estimate == Total (no buffer). Show a single Total.
+            summaryInner =
+                '<div class="ss-stat ss-total">' +
+                    '<span class="ss-label">Total</span>' +
+                    '<span class="ss-val">' + fmt2(totals.final) + '</span>' +
+                    '<span class="ss-unit">h</span>' +
+                '</div>';
+        } else {
+            summaryInner =
                 '<div class="ss-stat">' +
                     '<span class="ss-label">Estimate</span>' +
                     '<span class="ss-val">' + fmt2(totals.estimate) + '</span>' +
@@ -451,7 +510,11 @@
                     '<span class="ss-label">Total</span>' +
                     '<span class="ss-val">' + fmt2(totals.final) + '</span>' +
                     '<span class="ss-unit">h</span>' +
-                '</div>' +
+                '</div>';
+        }
+
+        document.getElementById('previewSummary').innerHTML =
+            '<div class="summary-strip">' + summaryInner +
                 '<div class="ss-counts">' +
                     categories.length + (categories.length === 1 ? ' category' : ' categories') + ' &nbsp;&middot;&nbsp; ' +
                     taskCount + (taskCount === 1 ? ' task' : ' tasks') + ' &nbsp;&middot;&nbsp; ' +
@@ -501,6 +564,37 @@
                     ? '<span class="task-difficulty" title="Difficulty">' + esc(difficultyVal) + '</span>'
                     : '';
 
+                // SSD Team's tasks carry a per-phase 標準/調整/見積
+                // breakdown and have no buffer concept — their final is
+                // 見積工数 (標準+調整), full stop. Showing an editable Buf
+                // field there is misleading (it changes nothing on
+                // export), so hide the Buf portion for such tasks. Other
+                // teams (Bamawl uses buffer in its export) keep it.
+                var taskHasBreakdown = (task.activities || []).some(function(a) {
+                    return a.standard_hours !== undefined || a.adjustment_hours !== undefined;
+                });
+
+                // For SSD (no buffer), Est and Total are always equal —
+                // showing both is redundant. Show a single total instead.
+                // Other teams keep the full Est · Buf · Total breakdown.
+                var statsHtml;
+                if (taskHasBreakdown) {
+                    statsHtml =
+                        '<strong class="ts-total"><span data-sum="final" data-ci="' + ci + '" data-ti="' + ti + '">' + fmt2(task.total_hours) + '</span>h</strong>' +
+                        '<span data-sum="estimate" data-ci="' + ci + '" data-ti="' + ti + '" style="display:none;">' + fmt2(task.estimate_hours) + '</span>';
+                } else {
+                    statsHtml =
+                        '<span class="ts-label">Est</span>' +
+                        '<span data-sum="estimate" data-ci="' + ci + '" data-ti="' + ti + '" class="ts-num">' + fmt2(task.estimate_hours) + '</span>' +
+                        '<span class="ts-unit">h</span>' +
+                        '<span class="ts-sep">&middot;</span>' +
+                        '<span class="ts-label">Buf</span>' +
+                        '<span class="editable ts-num" contenteditable="true" data-field="buffer" data-ci="' + ci + '" data-ti="' + ti + '">' + fmt2(task.buffer_hours) + '</span>' +
+                        '<span class="ts-unit">h</span>' +
+                        '<span class="ts-sep">&middot;</span>' +
+                        '<strong class="ts-total"><span data-sum="final" data-ci="' + ci + '" data-ti="' + ti + '">' + fmt2(task.total_hours) + '</span>h</strong>';
+                }
+
                 // Task header row — no add button here
                 html +=
                     '<div class="task-header d-flex align-items-center gap-2 px-3 py-2">' +
@@ -510,15 +604,7 @@
                             difficultyHtml +
                         '</div>' +
                         '<div class="task-stats">' +
-                            '<span class="ts-label">Est</span>' +
-                            '<span data-sum="estimate" data-ci="' + ci + '" data-ti="' + ti + '" class="ts-num">' + fmt2(task.estimate_hours) + '</span>' +
-                            '<span class="ts-unit">h</span>' +
-                            '<span class="ts-sep">&middot;</span>' +
-                            '<span class="ts-label">Buf</span>' +
-                            '<span class="editable ts-num" contenteditable="true" data-field="buffer" data-ci="' + ci + '" data-ti="' + ti + '">' + fmt2(task.buffer_hours) + '</span>' +
-                            '<span class="ts-unit">h</span>' +
-                            '<span class="ts-sep">&middot;</span>' +
-                            '<strong class="ts-total"><span data-sum="final" data-ci="' + ci + '" data-ti="' + ti + '">' + fmt2(task.total_hours) + '</span>h</strong>' +
+                            statsHtml +
                         '</div>' +
                         '<button class="collapse-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" aria-expanded="true">' +
                             '<i class="bi bi-chevron-up"></i>' +
@@ -531,24 +617,66 @@
 
                 // Activity rows
                 task.activities.forEach(function(act, ai) {
-                    html +=
-                        '<div class="activity-row d-flex align-items-center gap-2 px-3 py-2">' +
-                            '<button class="del-btn flex-shrink-0" data-del="activity" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '" title="Delete activity">&times;</button>' +
-                            '<span class="editable flex-grow-1" contenteditable="true" data-field="task_detail" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '">' + esc(act.task_detail) + '</span>' +
+                    // SSD Team's per-phase 標準 / 調整 / 見積 breakdown renders as
+                    // three aligned, labelled cells (標準 and 調整 read-only, 見積
+                    // editable). Other teams (no breakdown fields) keep the
+                    // simple single editable estimate cell.
+                    var hasBreakdown = (act.standard_hours !== undefined || act.adjustment_hours !== undefined);
+                    var hoursHtml;
+                    if (hasBreakdown) {
+                        hoursHtml =
+                            '<div class="act-hours-group" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '">' +
+                                '<span class="act-hcell"><span class="act-hcap">標準</span><span class="act-hval">' + fmt2(act.standard_hours || 0) + '</span></span>' +
+                                '<span class="act-hcell"><span class="act-hcap">調整</span><span class="act-hval act-adj-val">' + fmt2(act.adjustment_hours || 0) + '</span></span>' +
+                                '<span class="act-hcell act-hcell-est">' +
+                                    '<span class="act-hcap">見積</span>' +
+                                    '<span><span class="editable act-est-input" contenteditable="true" data-field="act_estimate" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '">' + fmt2(act.estimate_hours) + '</span><span class="act-h-label">h</span></span>' +
+                                '</span>' +
+                            '</div>';
+                    } else {
+                        hoursHtml =
                             '<div class="d-flex align-items-center gap-1 act-hours-col justify-content-end">' +
                                 '<span class="editable act-est-input" contenteditable="true" data-field="act_estimate" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '">' + fmt2(act.estimate_hours) + '</span>' +
                                 '<span class="act-h-label">h</span>' +
-                            '</div>' +
-                        '</div>';
+                            '</div>';
+                    }
+                    // SSD Team's phases are a FIXED structural set mapped
+                    // to specific template columns by their label, so its
+                    // activity rows are not deletable and their phase name
+                    // is read-only — renaming or removing one would break
+                    // the phase→column mapping on export. Other teams keep
+                    // the delete button and editable detail name.
+                    if (hasBreakdown) {
+                        html +=
+                            '<div class="activity-row d-flex align-items-center gap-2 px-3 py-2">' +
+                                '<span class="flex-grow-1" style="padding-left:0.35rem;">' + esc(act.task_detail) + '</span>' +
+                                hoursHtml +
+                            '</div>';
+                    } else {
+                        html +=
+                            '<div class="activity-row d-flex align-items-center gap-2 px-3 py-2">' +
+                                '<button class="del-btn flex-shrink-0" data-del="activity" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '" title="Delete activity">&times;</button>' +
+                                '<span class="editable flex-grow-1" contenteditable="true" data-field="task_detail" data-ci="' + ci + '" data-ti="' + ti + '" data-ai="' + ai + '">' + esc(act.task_detail) + '</span>' +
+                                hoursHtml +
+                            '</div>';
+                    }
                 });
 
-                // + Add Activity — inside the activities section where it will appear
-                html +=
-                    '<div class="act-footer px-3 py-2">' +
-                        '<button class="add-btn btn btn-sm" data-add="activity" data-ci="' + ci + '" data-ti="' + ti + '">' +
-                            '<i class="bi bi-plus-circle me-1"></i>Add Activity' +
-                        '</button>' +
-                    '</div>';
+                // + Add Activity — hidden for SSD Team's tasks, whose
+                // activities are a FIXED set of four template phases
+                // (詳細設計/実装/単体テスト/結合テスト), each mapped to its own
+                // 標準/調整/見積 columns. An added 5th activity would have
+                // no column to export into, so its hours would silently
+                // drop and the exported total would no longer match
+                // Preview. Other teams (flexible activity lists) keep it.
+                if (!taskHasBreakdown) {
+                    html +=
+                        '<div class="act-footer px-3 py-2">' +
+                            '<button class="add-btn btn btn-sm" data-add="activity" data-ci="' + ci + '" data-ti="' + ti + '">' +
+                                '<i class="bi bi-plus-circle me-1"></i>Add Activity' +
+                            '</button>' +
+                        '</div>';
+                }
 
                 html += '</div>'; // activities-list
                 html += '</div>'; // collapse
@@ -573,11 +701,13 @@
 
     function renderFooter() {
         var totals = calcTotals();
+        var footBuffer = previewHasBreakdown() ? '' :
+            '<div class="total-item"><div class="total-item-label">Buffer</div><div class="total-item-val">' + fmt2(totals.buffer) + 'h</div></div>';
         document.getElementById('previewFoot').innerHTML =
             '<div class="totals-panel">' +
                 '<span class="totals-label">Grand Total</span>' +
                 '<div class="total-item"><div class="total-item-label">Estimate</div><div class="total-item-val">' + fmt2(totals.estimate) + 'h</div></div>' +
-                '<div class="total-item"><div class="total-item-label">Buffer</div><div class="total-item-val">' + fmt2(totals.buffer) + 'h</div></div>' +
+                footBuffer +
                 '<div class="total-item total-item-final"><div class="total-item-label">Grand Total</div><div class="total-item-val">' + fmt2(totals.final) + 'h</div></div>' +
             '</div>';
     }
@@ -656,8 +786,19 @@
         else if (field === 'act_estimate') {
             var num = parseFloat(val);
             if (isNaN(num)) num = 0;
-            categories[ci].tasks[ti].activities[ai].estimate_hours = num;
+            var act = categories[ci].tasks[ti].activities[ai];
+            act.estimate_hours = num;
             el.textContent = num;
+            // For SSD Team's 標準/調整/見積 breakdown, 標準作業工数 is fixed
+            // (it comes from 難易度), so an edited 見積工数 is reconciled by
+            // moving the difference into 調整工数 — keeping 見積 = 標準 + 調整
+            // consistent on export, matching how the Excel's 調整 knob works.
+            if (act.standard_hours !== undefined || act.adjustment_hours !== undefined) {
+                var std = parseFloat(act.standard_hours) || 0;
+                act.adjustment_hours = num - std;
+                var adjEl = document.querySelector('.act-hours-group[data-ci="' + ci + '"][data-ti="' + ti + '"][data-ai="' + ai + '"] .act-adj-val');
+                if (adjEl) adjEl.textContent = fmt2(act.adjustment_hours);
+            }
             recalcTask(ci, ti);
         }
         else if (field === 'buffer') {
@@ -686,16 +827,7 @@
             var ci = parseInt(addBtn.getAttribute('data-ci'), 10);
 
             if (addType === 'task') {
-                categories[ci].tasks.push({
-                    task: 'New Task',
-                    estimate_hours: 0,
-                    buffer_hours: 0,
-                    total_hours: 0,
-                    activities: [{
-                        task_detail: 'New Activity',
-                        estimate_hours: 0
-                    }]
-                });
+                categories[ci].tasks.push(makeNewTask());
             }
             else if (addType === 'activity') {
                 var ti = parseInt(addBtn.getAttribute('data-ti'), 10);

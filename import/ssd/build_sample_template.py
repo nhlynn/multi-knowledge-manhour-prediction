@@ -184,13 +184,20 @@ def main() -> None:
     # guarantees no real project text, person names (体制), code
     # snippets (対応方針), or dates leak into the public sample.
     #
+    # Deliberately NOT cleared: 成果物 (a project-agnostic STANDARD
+    # deliverable master list — 画面処理仕様書, PGソース etc. — identical
+    # across projects, useful to keep in the download; its only
+    # project-identifying cell is the title header, a "=見積総額!B2…"
+    # formula that auto-updates when 見積総額's title is sanitized above)
+    # and シート説明/難易度別標準工数 (instruction manual / reference table,
+    # kept for the same reason).
+    #
     # header_rows_to_keep is per-sheet: enough to preserve that sheet's
     # own column-header row (below which everything is project content).
     _NARRATIVE_SHEETS = {
         "対応方針": 4,
         "前提条件": 4,
         "体制": 4,       # keeps 会社/お名前/役割/備考 header, drops real names
-        "成果物": 4,
         "スケジュール": 4,
         "システム構成図": 2,
     }

@@ -90,6 +90,13 @@ _REQUIREMENT_HEADER = "要件（ユースケース）"  # E — requirement / us
 _DIFFICULTY_HEADER = "難易度"      # F — S/A/B/C/D, drives the lookup
 _KIND_HEADER = "新規/改定"         # G — new vs revised
 _BASIS_HEADER = "見積根拠"         # H — estimate basis (embeddable)
+# I — 工数説明（難易度説明）: the free-text note explaining the hours /
+# why a task's hours deviate from the 難易度別標準工数 table. Its header
+# label lives on row 6 (I6), not the field-header row 5, so it's
+# resolved by column position relative to 見積根拠 rather than by row-5
+# text. Real per-task content ("結合テストはNo2,3,4をまとめテスト" etc.),
+# carried through to export and folded into the embeddable text.
+_WORK_NOTE_HEADER = "工数説明"
 
 # The three merged group labels on row 5. The parser resolves all
 # three phase-column groups from their merge spans:
@@ -224,6 +231,22 @@ def _resolve_field_columns(ws) -> dict[str, int]:
     }
 
 
+def _resolve_work_note_column(ws, basis_col: int | None) -> int | None:
+    """Return the 工数説明 column — the second column of the 見積根拠
+    merged header (H5:I5 in the sample). Located from that merge span so
+    a template that widens/moves the group is still handled; returns
+    None if 見積根拠 isn't merged across two columns (no separate 工数説明
+    column)."""
+    if not basis_col:
+        return None
+    for merged in ws.merged_cells.ranges:
+        if (merged.min_row == _FIELD_HEADER_ROW
+                and merged.min_col == basis_col
+                and merged.max_col > basis_col):
+            return merged.max_col
+    return None
+
+
 def _resolve_group_columns(
     ws, field_columns: dict[str, int], group_header: str,
 ) -> list[tuple[str, int]]:
@@ -313,6 +336,10 @@ def _process_detail_sheet(
     requirement_col = field_columns.get(_REQUIREMENT_HEADER)
     kind_col = field_columns.get(_KIND_HEADER)
     basis_col = field_columns.get(_BASIS_HEADER)
+    # 工数説明 sits in the second column of the 見積根拠 merged header
+    # (H5:I5 in the sample) — its own label is on row 6, not row 5, so
+    # it's located from that merge span rather than by row-5 text.
+    work_note_col = _resolve_work_note_column(ws, basis_col)
     standard_columns = _resolve_group_columns(ws, field_columns, _STANDARD_GROUP_HEADER)
     adjustment_columns = _resolve_group_columns(ws, field_columns, _ADJUSTMENT_GROUP_HEADER)
     estimate_columns = _resolve_group_columns(ws, field_columns, _ESTIMATE_GROUP_HEADER)
@@ -408,20 +435,21 @@ def _process_detail_sheet(
             overview=cell_text(row, overview_col),
             requirement=cell_text(row, requirement_col),
             basis=cell_text(row, basis_col),
+            work_note=cell_text(row, work_note_col),
             block=sheet_name,
         )
 
 
 def _build_embed_text(
-    task: str, overview: str, requirement: str, basis: str,
+    task: str, overview: str, requirement: str, basis: str, work_note: str = "",
 ) -> str:
     """Assemble the task's embeddable ``text`` from its descriptive
-    columns (機能名 + 機能概要 + 要件 + 見積根拠), skipping any that are
-    blank. This overrides the generic auto-generated summary text so
-    semantic search matches on the function's actual description and
-    domain vocabulary, not just an hours summary.
+    columns (機能名 + 機能概要 + 要件 + 見積根拠 + 工数説明), skipping any
+    that are blank. This overrides the generic auto-generated summary
+    text so semantic search matches on the function's actual
+    description and domain vocabulary, not just an hours summary.
     """
-    parts = [p for p in (task, overview, requirement, basis) if p]
+    parts = [p for p in (task, overview, requirement, basis, work_note) if p]
     return " ".join(parts)
 
 
@@ -437,6 +465,7 @@ def _add_task(
     overview: str,
     requirement: str,
     basis: str,
+    work_note: str,
     block: str,
 ) -> None:
     """Fold one task row into ``all_categories``, creating the
@@ -484,7 +513,12 @@ def _add_task(
             # _SEARCHABLE_TASK_TEXT_FIELDS), not only via semantic search.
             "overview": overview,
             "requirement": requirement,
-            "text": _build_embed_text(task, overview, requirement, basis),
+            # 見積根拠 and 工数説明 kept as their own fields (in addition to
+            # being folded into the embeddable text) so export can write
+            # the full column set back, not just name/hours.
+            "basis": basis,
+            "work_note": work_note,
+            "text": _build_embed_text(task, overview, requirement, basis, work_note),
         }
     task_data = cat_data["tasks"][task_key]
 
