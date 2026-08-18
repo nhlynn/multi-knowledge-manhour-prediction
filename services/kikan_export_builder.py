@@ -19,24 +19,29 @@ Design:
   BOTH populated, kept in lockstep -- see the "機能一覧 sync" note
   below for why. ``Milestone`` and ``工数・費用`` ship exactly as the
   template has them.
-- Every phase column (``実装工数``, ``コードレビュー``, ``仕様理解``, ...)
-  on a populated ``工数詳細`` row is written deterministically from
-  that task's activities: a literal value for a phase Preview actually
-  provided, or blank for one it didn't -- never left as the template's
-  own row-2 ratio formula, which would otherwise silently derive a
-  number from ``実装工数`` that the user never edited or approved. This
-  mirrors how the row's own hours were actually arrived at (a person's
-  edited estimate per phase), rather than mechanically reconstructing
-  a breakdown from a single base number. The row's own ``合計(h)`` cell
-  is left as its original ``=SUM(...)`` formula, which still correctly
-  totals whatever literals (and blanks) are written into the phase
-  cells above it once Excel opens the file.
-- A phase column on a row this export does **not** populate keeps its
-  original template formula untouched (see the ``業務分類``/rollup
-  note below) -- only ``実装工数`` is blanked across the whole block up
-  front, which is enough to zero out every other phase formula for an
-  unselected row (``0 * ratio = 0``) without touching those cells
-  directly.
+- The exported workbook KEEPS the template's own auto-calculate
+  formulas. On a populated ``工数詳細`` row, only ``実装工数``
+  (Development, column F) is written as a literal -- the one phase the
+  user edits in Preview. Every other phase column (``コードレビュー``,
+  ``仕様理解``, ``QA``, ...) and the row's own ``合計(h)`` total is written
+  as the template's OWN row-5 formula (``=F5*G$2``, chained ``=J5*K$2``,
+  sum-based ``=(F5+H5+J5+L5)*O$2``, ``=SUM(F5:M5)*P$2``,
+  ``=SUM(F5:P5)``), translated to that row (via
+  ``openpyxl.formula.translate.Translator``), so opening the file and
+  changing Development recomputes every derived phase and the total
+  exactly as the pristine template does. This is safe because Preview
+  already makes Development the only editable phase and derives every
+  other phase from it via these same coefficients, so the formula
+  always yields the number Preview showed. (Formula cells carry no
+  cached value, so reading the file with ``data_only=True`` sees
+  ``None`` until Excel opens and recalculates -- expected, and matches
+  the original template.)
+- A row this export does **not** populate is left FULLY blank: the
+  clear step below blanks every phase column and ``合計(h)`` across the
+  whole block up front, and formulas are re-written only into rows a
+  selected function is actually written into -- so no phantom formula
+  row is left for the workbook's built-in subtotal ranges (e.g.
+  ``SUM(F5:F11)``) to pick up.
 - ``業務分類`` (category) is merged across the whole function-row block
   in both worksheets (e.g. ``工数詳細``'s ``A5:A11``, ``機能一覧``'s
   ``A2:A8``) in the template -- only the merge's top-left cell is ever
@@ -113,6 +118,8 @@ from typing import Any
 
 import openpyxl
 from openpyxl.comments import Comment
+from openpyxl.formula.translate import Translator
+from openpyxl.utils import get_column_letter
 
 from services.base_export_service import BaseExportService, ExportContext
 from services.excel_parser import _find_column, _normalize_header, _safe_float
@@ -279,19 +286,23 @@ def build_kikan_workbook(
             "KiKan Team's export template's phase-hour columns could not be located; "
             "cannot populate 工数詳細."
         )
-    # Of all the phase columns, only "Development" (実装工数) ever holds
-    # a literal sample value in the pristine template -- every other
-    # phase column (コードレビュー, 仕様理解, QA, ...) is one of the
-    # template's own ratio formulas (e.g. G5 = F5*G$2). Blanking just
-    # this one column is enough to zero out every downstream formula
-    # for a row this export doesn't populate (0 * ratio = 0), so those
-    # untouched rows' other phase cells can keep their original
-    # template formulas rather than being blanked outright -- more
-    # faithful to "keep the worksheet layout identical to the template".
-    _base_hours_col = next(
+    # The exported workbook now KEEPS the template's own auto-calculate
+    # formulas: of all the phase columns, only "Development" (実装工数,
+    # column F) is a literal the user edited in Preview; every other
+    # phase column (コードレビュー, 仕様理解, QA, ...) and the 合計(h) total
+    # is one of the template's own row-5 formulas (e.g. G5=F5*G$2,
+    # chained J5*K$2, sum-based (F5+H5+J5+L5)*O$2, SUM(F5:M5)*P$2,
+    # Q5=SUM(F5:P5)). Each is captured below and re-written (translated)
+    # into every populated row, so changing Development in Excel
+    # recomputes the rest exactly as the pristine template does. Because
+    # Preview already derives every non-Development phase from Development
+    # via these same coefficients, the formula always yields the number
+    # Preview showed.
+    dev_col = next(
         (idx for label, idx in phase_cols if _normalize_header(label) == _normalize_header("Development")),
         None,
     )
+    total_col = _column_index(name_to_col, column_mapping.get("total_column"))
 
     tasks_with_category = [
         (cat.get("category", ""), task) for cat in categories for task in cat.get("tasks", [])
@@ -307,6 +318,40 @@ def build_kikan_workbook(
             f"before its built-in rollup rows -- reduce the number of selected functions, "
             f"or update the template."
         )
+
+    # Capture each derived phase column's and the 合計(h) total column's
+    # template formula BEFORE the block is cleared below, so each can be
+    # re-written (row-translated) into every populated row. Only genuine
+    # formulas (leading "=") are captured; a column that isn't a formula
+    # there falls back to the old literal behavior.
+    #
+    # Source row: capture from the second data row when the block has one
+    # (KiKan's rows are uniform -- F6=``=F6*G$2`` -- but this also makes
+    # the two builders share one rule; the sibling Bamawl builder MUST
+    # skip its first data row, whose coefficient refs are relative). Any
+    # subsequent row translates correctly to any other row (including
+    # back up to the first).
+    formula_src_row = data_start_row
+    if capacity >= 2 and total_col:
+        probe = ws.cell(row=data_start_row + 1, column=total_col).value
+        if isinstance(probe, str) and probe.startswith("="):
+            formula_src_row = data_start_row + 1
+
+    captured_formulas: dict[int, str] = {}
+    for col_idx in [idx for _label, idx in phase_cols if idx != dev_col] + (
+        [total_col] if total_col else []
+    ):
+        raw = ws.cell(row=formula_src_row, column=col_idx).value
+        if isinstance(raw, str) and raw.startswith("="):
+            captured_formulas[col_idx] = raw
+
+    def _row_formula(col_idx: int, r: int) -> str:
+        """Translate a captured template formula from ``formula_src_row``
+        to row ``r`` (absolute refs like ``G$2`` stay fixed; relative
+        refs like ``F5`` shift to ``F{r}``)."""
+        origin = f"{get_column_letter(col_idx)}{formula_src_row}"
+        dest = f"{get_column_letter(col_idx)}{r}"
+        return Translator(captured_formulas[col_idx], origin=origin).translate_formula(dest)
 
     # 機能一覧 sync (see module docstring's "機能一覧 sync" note) -- both
     # sheets are populated together from the same tasks_with_category
@@ -347,12 +392,13 @@ def build_kikan_workbook(
     # Clear the template's whole function-row block first -- 機能名称
     # (whose original VLOOKUP formula is replaced with a literal name
     # only for rows a selected function is actually written into),
-    # 番号/機能ID/Status, and the one phase column that ever holds a
-    # literal sample value (see above) -- so no leftover sample name or
-    # sample hours lingers past however many real rows are written
-    # below. Every other phase column's formula, and 合計(h), are left
-    # exactly as the template has them for rows this export doesn't
-    # populate.
+    # 番号/機能ID/Status, and EVERY phase column plus 合計(h) -- so no
+    # leftover sample name/hours, and no template formula, lingers past
+    # however many real rows are written below. A row this export
+    # doesn't populate is left fully blank (no phantom formula), so the
+    # workbook's built-in subtotal ranges (e.g. SUM(F5:F11)) don't pick
+    # up empty formula rows; formulas are re-written (translated) only
+    # into rows a selected function is actually written into.
     #
     # category_col is excluded here -- it's the top-left cell of a
     # merge spanning the whole block (A5:A11); every other cell in that
@@ -361,7 +407,7 @@ def build_kikan_workbook(
     # row.
     _clear_block(
         ws, data_start_row, capacity,
-        [name_col, no_col, func_id_col, status_col, _base_hours_col],
+        [name_col, no_col, func_id_col, status_col, total_col, *phase_col_indexes],
     )
     if category_col:
         ws.cell(row=data_start_row, column=category_col).value = None
@@ -449,22 +495,35 @@ def build_kikan_workbook(
         if func_list_content_col and content:
             func_list_ws.cell(row=func_list_row, column=func_list_content_col, value=content)
 
-        # Every phase column on a populated row is deterministically
-        # set to exactly what Preview provided -- its literal
-        # estimate_hours, or blank if this task has no matching
-        # activity. A phase the user never edited is never left as the
-        # template's own ratio formula (which would otherwise silently
-        # derive a number from 実装工数 that Preview never actually
-        # produced or the user never approved).
+        # Development (実装工数, the base) stays a literal -- the one
+        # phase the user edited in Preview -- written even when 0 (blank
+        # for 0 is fine; the derived formulas then compute 0). Every
+        # other phase column, and 合計(h), is written as the template's
+        # own formula translated to this row, so the exported file
+        # recomputes them live in Excel (changing Development
+        # recalculates the rest) exactly as the pristine template does.
+        # Because Preview derives every non-Development phase from
+        # Development via these same coefficients, the formula always
+        # yields the number Preview showed. A derived/total column with
+        # no captured template formula falls back to a literal.
+        #
+        # Direct attribute assignment (not the value= kwarg) because
+        # ws.cell(row, column, value=None) leaves a cell untouched when
+        # value is None -- here every cell was already blanked by the
+        # clear step, so a literal-0 phase correctly stays blank.
         for label, col_idx in phase_cols:
-            value = _phase_value(activities, label)
-            # Direct attribute assignment, not the value= kwarg above --
-            # ws.cell(row, column, value=None) deliberately leaves a
-            # cell untouched when value is None (openpyxl's "no value
-            # given" convenience behavior, not "clear it"), which would
-            # silently leave the template's ratio formula in place for
-            # exactly the un-edited-phase case this is meant to blank.
-            ws.cell(row=row, column=col_idx).value = value or None
+            if col_idx == dev_col or col_idx not in captured_formulas:
+                ws.cell(row=row, column=col_idx).value = _phase_value(activities, label) or None
+            else:
+                ws.cell(row=row, column=col_idx).value = _row_formula(col_idx, row)
+
+        if total_col is not None:
+            if total_col in captured_formulas:
+                ws.cell(row=row, column=total_col).value = _row_formula(total_col, row)
+            else:
+                ws.cell(row=row, column=total_col).value = (
+                    sum(_phase_value(activities, lbl) for lbl, _ in phase_cols) or None
+                )
 
     if unmatched_labels:
         logger.warning(

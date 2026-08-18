@@ -102,6 +102,8 @@ from copy import copy
 from typing import Any
 
 import openpyxl
+from openpyxl.formula.translate import Translator
+from openpyxl.utils import get_column_letter
 
 from services.base_export_service import BaseExportService, ExportContext
 from services.excel_parser import _find_column, _normalize_header, _safe_float
@@ -614,9 +616,64 @@ def build_bamawl_workbook(
             f"subtotal rows -- reduce the number of tasks, or update the template."
         )
 
+    # The exported workbook now KEEPS the template's own auto-calculate
+    # formulas: only "Development" (column D) is a literal the user
+    # edited in Preview; every derived phase column (E..AC) and the
+    # Total(h) column (AD) is the template's own formula
+    # (e.g. E6=``=D6*E$2``, chained N6*O$2, AD6=SUM(D6:AC6)), translated
+    # to each written row -- so changing Development in Excel recomputes
+    # the rest exactly as the pristine template does. Because Preview
+    # already derives every non-Development phase from Development via
+    # these same coefficients, the formula always yields the number
+    # Preview showed. (The template's row-5 リスク formula carries a stray
+    # AA47 reference to an empty cell; capturing from the canonical
+    # second data row -- see below -- uses the clean AA{row} form every
+    # other template row already has, so nothing needs "fixing".)
+    dev_col = next(
+        (idx for label, idx in phase_cols if _normalize_header(label) == _normalize_header("Development")),
+        None,
+    )
+    # Capture each derived phase column's and the total column's template
+    # formula BEFORE the block is cleared below, so each can be re-written
+    # (row-translated) into every populated row.
+    #
+    # Source row: the template's FIRST data row (row 5) carries RELATIVE
+    # coefficient references (e.g. E5=``=D5*E2``) and a stray ``AA47`` in
+    # リスク -- both of which would shift wrongly when translated to
+    # another row (E2 -> E3). Every SUBSEQUENT row uses the canonical
+    # ABSOLUTE-coefficient form (E6=``=D6*E$2``, ``AA6``), which
+    # translates correctly to any row (including back up to row 5), so
+    # capture from the second data row when the block has one. Only
+    # genuine formulas (leading "=") are captured; a column that isn't a
+    # formula there falls back to the old literal behavior.
+    formula_src_row = data_start_row
+    if capacity >= 2 and total_col:
+        probe = ws.cell(row=data_start_row + 1, column=total_col).value
+        if isinstance(probe, str) and probe.startswith("="):
+            formula_src_row = data_start_row + 1
+
+    captured_formulas: dict[int, str] = {}
+    for col_idx in [idx for _label, idx in phase_cols if idx != dev_col] + (
+        [total_col] if total_col else []
+    ):
+        raw = ws.cell(row=formula_src_row, column=col_idx).value
+        if isinstance(raw, str) and raw.startswith("="):
+            captured_formulas[col_idx] = raw
+
+    def _row_formula(col_idx: int, r: int) -> str:
+        """Translate a captured template formula from ``formula_src_row``
+        to row ``r`` (absolute refs like ``E$2`` stay fixed; relative
+        refs like ``D5`` shift to ``D{r}``)."""
+        origin = f"{get_column_letter(col_idx)}{formula_src_row}"
+        dest = f"{get_column_letter(col_idx)}{r}"
+        return Translator(captured_formulas[col_idx], origin=origin).translate_formula(dest)
+
     # Clear the template's own sample rows across the whole task-row
     # block first, so no leftover sample values (or their formulas)
-    # linger past however many real rows are written below.
+    # linger past however many real rows are written below -- rows this
+    # export doesn't populate are left fully blank (no phantom formula),
+    # so the built-in subtotal ranges (e.g. AD15=SUM(AD5:AD14)) don't
+    # pick up empty formula rows.
     for r in range(data_start_row, data_start_row + capacity):
         for c in range(1, ws.max_column + 1):
             ws.cell(row=r, column=c).value = None
@@ -640,20 +697,31 @@ def build_bamawl_workbook(
             if status:
                 ws.cell(row=row, column=status_col, value=status)
 
-        activities_sum = 0.0
+        # Development (base) stays a literal -- the one phase the user
+        # edited in Preview. Every derived phase column is written as the
+        # template's own formula translated to this row, so the exported
+        # file recomputes it live in Excel (changing Development
+        # recalculates everything downstream) exactly as the pristine
+        # template does. A derived column with no captured template
+        # formula falls back to a literal.
         for label, col_idx in phase_cols:
-            value = _phase_value(activities, label)
-            if value:
-                ws.cell(row=row, column=col_idx, value=value)
-                activities_sum += value
+            if col_idx == dev_col or col_idx not in captured_formulas:
+                ws.cell(row=row, column=col_idx).value = _phase_value(activities, label) or None
+            else:
+                ws.cell(row=row, column=col_idx).value = _row_formula(col_idx, row)
 
-        # The row's Total(h) cell is just the sum of this task's phase
-        # columns — the same thing the template's own =SUM(D:AC) formula
-        # would produce. Bamawl has no buffer concept (its estimate IS
-        # the total), so nothing extra is added; the workbook's built-in
-        # TotalManhour sum (=ALL_Detail!AD15=SUM(AD5:AD14)) stays correct.
+        # The row's Total(h) cell is now the template's own
+        # =SUM(D:AC)-shape formula (translated to this row) rather than a
+        # pre-summed literal, so it stays live in Excel and keeps
+        # TotalManhour's own workbook formulas consistent. Falls back to
+        # a literal phase-sum only if that formula couldn't be captured.
         if total_col:
-            ws.cell(row=row, column=total_col, value=activities_sum)
+            if total_col in captured_formulas:
+                ws.cell(row=row, column=total_col).value = _row_formula(total_col, row)
+            else:
+                ws.cell(row=row, column=total_col).value = (
+                    sum(_phase_value(activities, lbl) for lbl, _ in phase_cols) or None
+                )
 
         row += 1
 
