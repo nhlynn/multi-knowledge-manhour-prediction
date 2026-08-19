@@ -66,6 +66,7 @@ class DefaultExportStrategy(BaseExportService):
         build_workbook(
             context.filepath, context.project_name, context.created_by,
             context.categories, template_config=context.template_config,
+            project_remark=context.project_remark,
         )
 
 

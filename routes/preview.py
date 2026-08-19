@@ -360,6 +360,7 @@ def create_stash():
         totals=data.get("totals") or {},
         project_name=data.get("projectName") or "",
         created_by=data.get("createdBy") or "",
+        project_remark=data.get("projectRemark") or "",
         # Always the creating user's own team, never
         # _team_id_filter()'s "every team" (None for Admin) -- a
         # stash always belongs to exactly one real team, regardless of

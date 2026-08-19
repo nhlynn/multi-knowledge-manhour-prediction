@@ -129,6 +129,7 @@ def _current_team_name() -> str | None:
 
 def _select_export_strategy(
     build_path: str, project_name: str, created_by: str, categories: list,
+    project_remark: str = "",
 ) -> tuple:
     """Select this export's Strategy Pattern object and build its
     ``ExportContext`` (see ``services/base_export_service.py``,
@@ -192,6 +193,7 @@ def _select_export_strategy(
         filepath=build_path, categories=categories, project_name=project_name,
         created_by=created_by,
         template_config=_team_export_template(),
+        project_remark=project_remark,
     )
 
 
@@ -208,6 +210,7 @@ def export_excel():
     data = request.get_json(silent=True) or {}
     project_name = (data.get("projectName") or "").strip()
     created_by = (data.get("createdBy") or "").strip()
+    project_remark = data.get("projectRemark") or ""
     categories = data.get("categories", [])
 
     if not project_name:
@@ -224,7 +227,7 @@ def export_excel():
     os.makedirs(temp_dir, exist_ok=True)
     build_path = os.path.join(temp_dir, build_export_filename(safe_name))
 
-    strategy, context = _select_export_strategy(build_path, project_name, created_by, categories)
+    strategy, context = _select_export_strategy(build_path, project_name, created_by, categories, project_remark)
 
     try:
         strategy.build(context)

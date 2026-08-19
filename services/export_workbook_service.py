@@ -8,13 +8,165 @@ from the original ``routes/export.py::_build_workbook``.
 """
 
 import logging
+import re
 from datetime import datetime
+from html import unescape
+from html.parser import HTMLParser
 
 from openpyxl import Workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 logger = logging.getLogger(__name__)
+
+
+def _css_color_to_hex(value: str) -> str | None:
+    """Convert a CSS color from a style attribute ("#e60000" or
+    "rgb(230, 0, 0)") to an openpyxl "RRGGBB" hex string, or None."""
+    if not value:
+        return None
+    value = value.strip()
+    m = re.search(r"#([0-9a-fA-F]{6})", value)
+    if m:
+        return m.group(1).upper()
+    m = re.search(r"rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", value)
+    if m:
+        r, g, b = (int(m.group(i)) for i in (1, 2, 3))
+        return f"{r:02X}{g:02X}{b:02X}"
+    return None
+
+
+class _RemarkHtmlParser(HTMLParser):
+    """Turn Preview's sanitized remark HTML into a list of formatted
+    runs: (text, bold, italic, underline, color-hex-or-None). Block tags
+    become newlines; list items get a bullet or running number prefix so
+    the structure survives in a single Excel cell."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.runs: list[tuple[str, bool, bool, bool, str | None]] = []
+        self._bold = 0
+        self._italic = 0
+        self._underline = 0
+        self._colors: list[str] = []
+        self._ordered_counter = 0
+
+    def _emit(self, text: str) -> None:
+        if text == "":
+            return
+        self.runs.append((
+            text,
+            self._bold > 0,
+            self._italic > 0,
+            self._underline > 0,
+            self._colors[-1] if self._colors else None,
+        ))
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag in ("b", "strong"):
+            self._bold += 1
+        elif tag in ("i", "em"):
+            self._italic += 1
+        elif tag == "u":
+            self._underline += 1
+        elif tag == "span":
+            color = _css_color_to_hex(attrs.get("style", ""))
+            self._colors.append(color if color else (self._colors[-1] if self._colors else None))
+        elif tag in ("ol", "ul"):
+            self._ordered_counter = 0
+        elif tag == "br":
+            self._emit("\n")
+        elif tag == "li":
+            if self.runs and not self.runs[-1][0].endswith("\n"):
+                self._emit("\n")
+            if (attrs.get("data-list") or "").lower() == "ordered":
+                self._ordered_counter += 1
+                self._emit("%d. " % self._ordered_counter)
+            else:
+                self._emit("\u2022 ")
+
+    def handle_endtag(self, tag):
+        if tag in ("b", "strong"):
+            self._bold = max(0, self._bold - 1)
+        elif tag in ("i", "em"):
+            self._italic = max(0, self._italic - 1)
+        elif tag == "u":
+            self._underline = max(0, self._underline - 1)
+        elif tag == "span":
+            if self._colors:
+                self._colors.pop()
+        elif tag in ("p", "div", "li", "blockquote"):
+            self._emit("\n")
+        elif tag in ("ol", "ul"):
+            self._ordered_counter = 0
+
+    def handle_data(self, data):
+        if data:
+            self._emit(data)
+
+
+def _normalize_runs(runs):
+    """Collapse repeated blank lines and trim leading/trailing newlines
+    across the whole run list, preserving each run's formatting."""
+    # Flatten to (text, fmt) then rebuild, collapsing 3+ newlines to 2.
+    text_all = "".join(r[0] for r in runs)
+    text_all = re.sub(r"\n{3,}", "\n\n", text_all).strip("\n")
+    if not text_all.strip():
+        return []
+    # Re-walk runs, dropping characters trimmed above from the head/tail.
+    # Simple approach: rebuild by trimming leading/trailing newline-only
+    # runs and collapsing interior blank runs.
+    cleaned = []
+    for text, b, i, u, color in runs:
+        cleaned.append([text, b, i, u, color])
+    # strip leading newline-only runs
+    while cleaned and cleaned[0][0].strip("\n") == "" and "\n" in cleaned[0][0] and cleaned[0][0].strip() == "":
+        cleaned.pop(0)
+    while cleaned and cleaned[-1][0].strip() == "" and "\n" in cleaned[-1][0]:
+        cleaned.pop()
+    return [tuple(r) for r in cleaned if r[0] != ""]
+
+
+def _html_to_rich_text(html: str):
+    """Convert sanitized remark HTML to an openpyxl CellRichText that
+    keeps bold/italic/underline/color and list structure. Returns a
+    plain str when there's no formatting, or "" when empty."""
+    if not html:
+        return ""
+    parser = _RemarkHtmlParser()
+    parser.feed(html)
+    runs = _normalize_runs(parser.runs)
+    if not runs:
+        return ""
+    # If nothing is formatted, a plain string is cleaner than a
+    # single-block CellRichText.
+    if all(not b and not i and not u and not color for _t, b, i, u, color in runs):
+        return "".join(t for t, *_ in runs).strip()
+    blocks = []
+    for text, b, i, u, color in runs:
+        font = InlineFont(
+            b=b or None,
+            i=i or None,
+            u="single" if u else None,
+            color=color if color else None,
+        )
+        blocks.append(TextBlock(font, text))
+    return CellRichText(blocks)
+
+
+def _html_to_plain_text(html: str) -> str:
+    """Flatten Preview's sanitized remark HTML to plain text (used only
+    to measure how many lines the remark needs for row height)."""
+    if not html:
+        return ""
+    parser = _RemarkHtmlParser()
+    parser.feed(html)
+    runs = _normalize_runs(parser.runs)
+    return "".join(t for t, *_ in runs).strip()
+
 
 DEFAULT_EXPORT_TEMPLATE = {
     "sheet_title": "Manhour",
@@ -67,6 +219,7 @@ def build_workbook(
     created_by: str,
     categories: list,
     template_config: dict | None = None,
+    project_remark: str = "",
 ) -> None:
     """Build an Excel workbook using a team's configured column template.
 
@@ -220,5 +373,27 @@ def build_workbook(
             row=total_row, column=working_day_col,
             value=f"={get_column_letter(estimate_col)}{total_row}/8",
         ).alignment = center_align
+
+    # --- Remark section (project-level rich-text remark, if any) ---
+    # The remark arrives as sanitized HTML from Preview's rich-text
+    # editor. Convert it to an openpyxl CellRichText so bold/italic/
+    # underline/color and list structure survive in the cell; falls back
+    # to a plain string when there's no formatting. Rendered as a
+    # "Remark" label row followed by one merged, wrapped, top-aligned
+    # cell spanning all columns.
+    remark_rich = _html_to_rich_text(project_remark)
+    if remark_rich:
+        label_row = total_row + 2
+        ws.cell(row=label_row, column=1, value="Remark").font = total_font
+        body_row = label_row + 1
+        ws.merge_cells(
+            start_row=body_row, start_column=1,
+            end_row=body_row, end_column=num_cols,
+        )
+        remark_cell = ws.cell(row=body_row, column=1, value=remark_rich)
+        remark_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        # Give the merged remark row room for a few lines of text.
+        line_count = _html_to_plain_text(project_remark).count("\n") + 1
+        ws.row_dimensions[body_row].height = max(60, min(line_count * 15 + 10, 400))
 
     wb.save(filepath)

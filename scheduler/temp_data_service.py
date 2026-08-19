@@ -46,6 +46,10 @@ def _row_to_stash(row) -> dict[str, Any]:
         "teamName": row["team_name"] if "team_name" in keys else None,
         "categories": data.get("categories", []),
         "totals": data.get("totals", {}),
+        "projectRemark": (
+            (row["project_remark"] if "project_remark" in keys else "")
+            or data.get("projectRemark", "")
+        ),
     }
 
 
@@ -121,6 +125,7 @@ class TempDataService:
         totals: dict[str, Any],
         project_name: str,
         created_by: str = "",
+        project_remark: str = "",
         *,
         team_id: int,
     ) -> dict[str, Any]:
@@ -146,15 +151,17 @@ class TempDataService:
             "stash_type": "preview",
             "project_name": project_name or "",
             "created_by": created_by or "",
-            # project_remark: retained as an always-empty column on the
-            # existing temp_stashes table rather than a schema migration
-            # -- Project Remark itself was removed as a feature (no
-            # longer collected from Preview at all), but the column
-            # stays for now since dropping it isn't worth the migration
-            # risk for a field that simply always writes "" going forward.
-            "project_remark": "",
+            # Project-level rich-text remark (Infrastructure Team only).
+            # Stored both in its own column and inside json_data so a
+            # restore has it regardless of which the reader prefers.
+            "project_remark": project_remark or "",
             "json_data": json.dumps(
-                {"categories": categories, "totals": totals or {}}, ensure_ascii=False
+                {
+                    "categories": categories,
+                    "totals": totals or {},
+                    "projectRemark": project_remark or "",
+                },
+                ensure_ascii=False,
             ),
             "team_id": team_id,
             "created_at": created_at,

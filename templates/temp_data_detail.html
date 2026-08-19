@@ -250,6 +250,19 @@
                 '</div>' +
             '</div>';
 
+        // Project Remark (only rendered when the stash has one). The
+        // stored HTML was sanitized on save; sanitize again on display
+        // as defence-in-depth before injecting it.
+        if (stash.projectRemark && stripHtml(stash.projectRemark).trim()) {
+            html +=
+                '<div class="card mb-3" style="border:1px solid #e2e8f0;">' +
+                    '<div class="px-3 py-2" style="border-bottom:1px solid #eef2f6; font-weight:600; font-size:0.8rem; color:#334155;">Remark</div>' +
+                    '<div class="px-3 py-2 remark-view" style="font-size:0.85rem; color:#1e293b; line-height:1.55;">' +
+                        sanitizeRemarkHtml(stash.projectRemark) +
+                    '</div>' +
+                '</div>';
+        }
+
         categories.forEach(function(cat) {
             var catTotal = 0;
             cat.tasks.forEach(function(t) { catTotal += t.total_hours; });
@@ -282,10 +295,19 @@
 
                 html += '<div class="activities-list">';
                 task.activities.forEach(function(act) {
+                    var breakdown = '';
+                    if (act.standard_hours !== undefined || act.adjustment_hours !== undefined) {
+                        breakdown =
+                            '<span class="act-breakdown text-muted me-2" title="標準作業工数 / 調整工数">' +
+                                '標準 ' + fmt2(act.standard_hours || 0) +
+                                ' · 調整 ' + fmt2(act.adjustment_hours || 0) +
+                            '</span>';
+                    }
                     html +=
                         '<div class="activity-row d-flex align-items-center gap-2 px-3 py-2">' +
                             '<span class="flex-grow-1">' + esc(act.task_detail) + '</span>' +
                             '<div class="d-flex align-items-center gap-1 act-hours-col justify-content-end">' +
+                                breakdown +
                                 '<span class="fw-bold">' + fmt2(act.estimate_hours) + '</span>' +
                                 '<span class="act-h-label">h</span>' +
                             '</div>' +
@@ -389,7 +411,8 @@
             categories: existing,
             totals: totals,
             projectName: mergedProjectName || stash.projectName || '',
-            createdBy: mergedCreatedBy || stash.createdBy || ''
+            createdBy: mergedCreatedBy || stash.createdBy || '',
+            projectRemark: stash.projectRemark || ''
         }));
 
         // .catch() before .finally(): the server-side cleanup delete is
@@ -413,6 +436,48 @@
         var div = document.createElement('div');
         div.textContent = str || '';
         return div.innerHTML;
+    }
+
+    // Plain-text length check for a remark (to decide whether to render
+    // the Remark card at all).
+    function stripHtml(html) {
+        var tmp = document.createElement('div');
+        tmp.innerHTML = html || '';
+        return tmp.textContent || tmp.innerText || '';
+    }
+
+    // Whitelist-based sanitizer for displaying a saved remark's HTML --
+    // same tag/attribute policy as Preview's own sanitizeRemarkHtml, so
+    // a stash's stored remark renders with its formatting but can't
+    // carry scripts or event handlers.
+    var REMARK_ALLOWED_TAGS = { P:1, BR:1, B:1, STRONG:1, I:1, EM:1, U:1, S:1, UL:1, OL:1, LI:1, A:1, SPAN:1, DIV:1, BLOCKQUOTE:1 };
+    var REMARK_DANGEROUS_TAGS = { SCRIPT:1, STYLE:1, IFRAME:1, OBJECT:1, EMBED:1, SVG:1, FORM:1, INPUT:1, BUTTON:1 };
+    function sanitizeRemarkHtml(html) {
+        var tmp = document.createElement('div');
+        tmp.innerHTML = html || '';
+        (function clean(node) {
+            Array.prototype.slice.call(node.childNodes).forEach(function(child) {
+                if (child.nodeType === 1) {
+                    if (REMARK_DANGEROUS_TAGS[child.tagName]) { node.removeChild(child); return; }
+                    if (!REMARK_ALLOWED_TAGS[child.tagName]) {
+                        while (child.firstChild) node.insertBefore(child.firstChild, child);
+                        node.removeChild(child); return;
+                    }
+                    Array.prototype.slice.call(child.attributes).forEach(function(attr) {
+                        var name = attr.name.toLowerCase(), keep = false;
+                        if (child.tagName === 'A' && name === 'href' && /^(https?:|mailto:)/i.test(attr.value)) keep = true;
+                        if (child.tagName === 'SPAN' && name === 'style') keep = true;
+                        if (child.tagName === 'LI' && name === 'data-list') keep = true;
+                        if (!keep) child.removeAttribute(attr.name);
+                    });
+                    if (child.tagName === 'A') { child.setAttribute('target','_blank'); child.setAttribute('rel','noopener noreferrer'); }
+                    clean(child);
+                } else if (child.nodeType !== 3) {
+                    node.removeChild(child);
+                }
+            });
+        })(tmp);
+        return tmp.innerHTML;
     }
 
     // Display-only rounding to at most 2 decimal places (e.g.

@@ -48,6 +48,7 @@ class ExportContext:
     column_mapping: dict[str, Any] | None = None
     template_path: str | None = None
     template_config: dict[str, Any] | None = None
+    project_remark: str = ""
 
 
 class BaseExportService(ABC):

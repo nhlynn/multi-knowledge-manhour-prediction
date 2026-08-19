@@ -2,6 +2,7 @@
 {% block title %}Preview{% endblock %}
 
 {% block extra_css %}
+<link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
 <style>
     /* ── Editable spans ── */
     .editable {
@@ -279,6 +280,73 @@
         .totals-label { border-right: none; border-bottom: 1px solid rgba(255,255,255,0.06); }
         .total-item-final { border-left: none; border-top: 1px solid rgba(99,102,241,0.18); padding: 14px 20px; }
     }
+
+    /* ── Task remarks ── */
+    .task-remarks-row {
+        background: #fbfbfb; border-top: 1px dashed #ececec;
+        font-size: 0.78rem; color: #475569;
+    }
+    .task-remarks-row .editable:empty::before {
+        content: attr(data-placeholder);
+        color: #b0b8c1; font-style: italic;
+    }
+
+    /* ── Remark editor ── */
+    #projectRemarkEditorWrap .ql-toolbar.ql-snow {
+        border: 1px solid #e2e8f0;
+        border-bottom: none;
+        border-radius: 10px 10px 0 0;
+        background: #f8fafc;
+        padding: 8px 10px;
+    }
+    #projectRemarkEditorWrap .ql-container.ql-snow {
+        border: 1px solid #e2e8f0;
+        border-radius: 0 0 10px 10px;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-size: 0.875rem;
+        background: #fff;
+        resize: vertical;
+        overflow-y: auto;
+        min-height: 220px;
+    }
+    #projectRemarkEditorWrap .ql-editor {
+        min-height: 220px;
+        line-height: 1.55;
+        color: #1e293b;
+    }
+    #projectRemarkEditorWrap .ql-editor.ql-blank::before {
+        color: #94a3b8;
+        font-style: normal;
+        left: 15px; right: 15px;
+    }
+    #projectRemarkEditorWrap:focus-within .ql-toolbar.ql-snow,
+    #projectRemarkEditorWrap:focus-within .ql-container.ql-snow {
+        border-color: #6366f1;
+    }
+    #projectRemarkEditorWrap:focus-within .ql-container.ql-snow {
+        box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+    }
+    #projectRemarkToolbar.ql-toolbar.ql-snow .ql-formats { margin-right: 12px; }
+    #projectRemarkToolbar .ql-stroke { stroke: #64748b; }
+    #projectRemarkToolbar .ql-fill { fill: #64748b; }
+    #projectRemarkToolbar button:hover .ql-stroke,
+    #projectRemarkToolbar button.ql-active .ql-stroke,
+    #projectRemarkToolbar .ql-picker-label:hover .ql-stroke,
+    #projectRemarkToolbar .ql-picker.ql-expanded .ql-picker-label .ql-stroke { stroke: #6366f1; }
+    #projectRemarkToolbar button:hover .ql-fill,
+    #projectRemarkToolbar button.ql-active .ql-fill,
+    #projectRemarkToolbar .ql-picker-label:hover .ql-fill { fill: #6366f1; }
+    #projectRemarkToolbar button:hover,
+    #projectRemarkToolbar button.ql-active { color: #6366f1; }
+    #projectRemarkToolbar button {
+        width: 26px; height: 26px; border-radius: 5px;
+    }
+    #projectRemarkToolbar button:hover { background: #eef2ff; }
+    #projectRemarkEditorWrap.locked .ql-toolbar.ql-snow { display: none; }
+    #projectRemarkEditorWrap.locked .ql-container.ql-snow {
+        border-radius: 10px; background: #f8fafc; resize: none;
+    }
+    #projectRemarkEditorWrap.locked .ql-editor { cursor: default; }
 </style>
 {% endblock %}
 
@@ -298,6 +366,51 @@
         <label for="createdBy" class="form-label fw-semibold mb-1 mt-2" style="font-size:0.8rem;">Created By <span class="text-danger">*</span></label>
         <input type="text" class="form-control form-control-sm" id="createdBy" placeholder="Enter your name..." required>
         <div class="invalid-feedback">Please enter Created By before exporting.</div>
+    </div>
+</div>
+
+<div class="row" id="projectRemarkRow">
+    <div class="col">
+        <div class="card preview-section-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Remark</h5>
+                <small class="text-muted" style="font-size:0.72rem;" id="projectRemarkLockedBadge" hidden>
+                    <i class="bi bi-lock-fill me-1"></i>Read-only
+                </small>
+            </div>
+            <div class="card-body">
+                <div id="projectRemarkEditorWrap">
+                    <div id="projectRemarkToolbar">
+                        <span class="ql-formats">
+                            <button class="ql-bold" title="Bold"></button>
+                            <button class="ql-italic" title="Italic"></button>
+                        </span>
+                        <span class="ql-formats">
+                            <select class="ql-color" title="Font Color">
+                                <option value="#000000"></option><option value="#e60000"></option><option value="#ff9900"></option><option value="#ffff00"></option><option value="#008a00"></option><option value="#0066cc"></option><option value="#9933ff"></option>
+                                <option value="#ffffff"></option><option value="#facccc"></option><option value="#ffebcc"></option><option value="#ffffcc"></option><option value="#cce8cc"></option><option value="#cce0f5"></option><option value="#ebd6ff"></option>
+                                <option value="#bbbbbb"></option><option value="#f06666"></option><option value="#ffc266"></option><option value="#ffff66"></option><option value="#66b966"></option><option value="#66a3e0"></option><option value="#c285ff"></option>
+                                <option value="#888888"></option><option value="#a10000"></option><option value="#b26b00"></option><option value="#b2b200"></option><option value="#006100"></option><option value="#0047b2"></option><option value="#6b24b2"></option>
+                                <option value="#444444"></option><option value="#5c0000"></option><option value="#663d00"></option><option value="#666600"></option><option value="#003700"></option><option value="#002966"></option><option value="#3d1466"></option>
+                                <option selected></option>
+                            </select>
+                        </span>
+                        <span class="ql-formats">
+                            <button class="ql-list" value="bullet" title="Bullet List"></button>
+                            <button class="ql-list" value="ordered" title="Numbered List"></button>
+                        </span>
+                        <span class="ql-formats">
+                            <button class="ql-undo" title="Undo"><i class="bi bi-arrow-counterclockwise"></i></button>
+                            <button class="ql-redo" title="Redo"><i class="bi bi-arrow-clockwise"></i></button>
+                        </span>
+                    </div>
+                    <div id="projectRemarkEditor"></div>
+                </div>
+                <p id="projectRemarkEmpty" class="text-muted mb-0 mt-2" style="font-size:0.85rem; display:none;">
+                    <i class="bi bi-journal-x me-1"></i>No remark added.
+                </p>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -347,6 +460,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
 <script>
 (function() {
     // The current team's name, injected server-side (routes/preview.py).
@@ -356,13 +470,20 @@
     // is just noise. Today only Bamawl Team's export uses buffer —
     // KiKan/SGL write =SUM(phase columns) and SSD has no buffer concept.
     var TEAM_NAME = {{ team_name|tojson }};
-    // No team's export consumes a task's buffer hours anymore (each
-    // team's Total is just the sum of its phase columns), so the
-    // editable Buffer field is hidden everywhere — showing it would be
-    // noise that changes nothing on export. Kept as a list (not a flat
-    // false) so a future team that genuinely uses buffer can be
-    // re-enabled here without reworking the call sites.
-    var BUFFER_EXPORT_TEAMS = [];
+    // Only Infrastructure Team's export actually consumes a task's
+    // buffer hours (its default export writes total_hours = estimate +
+    // buffer). Bamawl/KiKan/SGL/SSD do not — their Total is just the
+    // sum of the phase columns — so the editable Buffer field is shown
+    // only for Infrastructure Team; for the others it would change
+    // nothing on export and only add noise.
+    var BUFFER_EXPORT_TEAMS = ['Infrastructure Team'];
+    // Remarks (the project-level rich-text Remark box AND the per-task
+    // remarks row) are an Infrastructure-Team-only feature: only its
+    // export has somewhere to put them, and the other teams' templates
+    // have no remarks concept. Gate every remarks touchpoint on this so
+    // the feature has zero effect for Bamawl/KiKan/SGL/SSD.
+    var REMARKS_TEAMS = ['Infrastructure Team'];
+    function remarksApply() { return REMARKS_TEAMS.indexOf(TEAM_NAME) !== -1; }
     function bufferApplies() {
         return BUFFER_EXPORT_TEAMS.indexOf(TEAM_NAME) !== -1;
     }
@@ -487,6 +608,103 @@
         sessionStorage.setItem('previewData', JSON.stringify(data));
     });
 
+    // --- Remark (rich text editor) ---
+    // Whitelist-based sanitizer: defense-in-depth against pasted/hand-crafted
+    // HTML containing scripts or event-handler attributes. Quill's own
+    // clipboard matchers already strip most of this on paste, but content
+    // set programmatically (e.g. restored from a stash) isn't guaranteed
+    // to have gone through them.
+    var REMARK_ALLOWED_TAGS = { P:1, BR:1, B:1, STRONG:1, I:1, EM:1, U:1, S:1, UL:1, OL:1, LI:1, A:1, SPAN:1, DIV:1, BLOCKQUOTE:1 };
+    var REMARK_DANGEROUS_TAGS = { SCRIPT:1, STYLE:1, IFRAME:1, OBJECT:1, EMBED:1, SVG:1, FORM:1, INPUT:1, BUTTON:1 };
+    function sanitizeRemarkHtml(html) {
+        var tmp = document.createElement('div');
+        tmp.innerHTML = html || '';
+        (function clean(node) {
+            var children = Array.prototype.slice.call(node.childNodes);
+            children.forEach(function(child) {
+                if (child.nodeType === 1) {
+                    if (REMARK_DANGEROUS_TAGS[child.tagName]) {
+                        node.removeChild(child);
+                        return;
+                    }
+                    if (!REMARK_ALLOWED_TAGS[child.tagName]) {
+                        while (child.firstChild) node.insertBefore(child.firstChild, child);
+                        node.removeChild(child);
+                        return;
+                    }
+                    Array.prototype.slice.call(child.attributes).forEach(function(attr) {
+                        var name = attr.name.toLowerCase();
+                        var keep = false;
+                        if (child.tagName === 'A' && name === 'href' && /^(https?:|mailto:)/i.test(attr.value)) keep = true;
+                        if (child.tagName === 'SPAN' && name === 'style') keep = true;
+                        if (child.tagName === 'LI' && name === 'data-list') keep = true;
+                        if (!keep) child.removeAttribute(attr.name);
+                    });
+                    if (child.tagName === 'A') {
+                        child.setAttribute('target', '_blank');
+                        child.setAttribute('rel', 'noopener noreferrer');
+                    }
+                    clean(child);
+                } else if (child.nodeType !== 3) {
+                    node.removeChild(child); // strip comments etc.
+                }
+            });
+        })(tmp);
+        return tmp.innerHTML;
+    }
+
+    var projectRemarkWrap = document.getElementById('projectRemarkEditorWrap');
+    var projectRemarkEmpty = document.getElementById('projectRemarkEmpty');
+    var projectRemarkLockedBadge = document.getElementById('projectRemarkLockedBadge');
+    var quill = null;
+    function applyProjectRemarkViewState() {
+        if (!quill) return;
+        var locked = !!data.projectRemarkLocked;
+        var isEmpty = quill.getText().trim().length === 0;
+        projectRemarkWrap.classList.toggle('locked', locked);
+        projectRemarkLockedBadge.hidden = !locked;
+        quill.enable(!locked);
+        var hideEditor = locked && isEmpty;
+        projectRemarkWrap.style.display = hideEditor ? 'none' : '';
+        projectRemarkEmpty.style.display = hideEditor ? '' : 'none';
+    }
+
+    if (remarksApply()) {
+        quill = new Quill('#projectRemarkEditor', {
+            theme: 'snow',
+            placeholder: 'Enter project overview, assumptions, deployment notes, customer requirements, risks, rollback plan, or any additional project information...',
+            modules: {
+                toolbar: {
+                    container: '#projectRemarkToolbar',
+                    handlers: {
+                        undo: function() { quill.history.undo(); },
+                        redo: function() { quill.history.redo(); }
+                    }
+                },
+                history: { delay: 800, maxStack: 200, userOnly: true }
+            }
+        });
+
+        if (data.projectRemark) {
+            quill.clipboard.dangerouslyPasteHTML(sanitizeRemarkHtml(data.projectRemark), 'silent');
+        }
+        applyProjectRemarkViewState();
+
+        quill.on('text-change', function() {
+            data.projectRemark = sanitizeRemarkHtml(quill.root.innerHTML);
+            saveData();
+            applyProjectRemarkViewState();
+        });
+    } else {
+        // Not Infrastructure Team: no remarks feature at all -- hide the
+        // whole Remark card and make sure no stale project remark rides
+        // along in any saved/exported payload.
+        var remarkRow = document.getElementById('projectRemarkRow');
+        if (remarkRow) remarkRow.style.display = 'none';
+        data.projectRemark = '';
+        data.projectRemarkLocked = false;
+    }
+
     // Clean up: remove categories with no tasks, tasks with no activities
     categories = categories.filter(function(cat) {
         if (!cat.tasks) cat.tasks = [];
@@ -527,8 +745,13 @@
 
     // Clear All button
     document.getElementById('clearAllBtn').addEventListener('click', function() {
-        sessionStorage.removeItem('previewData');
         categories = [];
+        data.categories = categories;
+        data.projectRemark = '';
+        data.projectRemarkLocked = false;
+        if (quill) quill.setText('');
+        sessionStorage.removeItem('previewData');
+        applyProjectRemarkViewState();
         showEmpty();
     });
 
@@ -790,6 +1013,15 @@
                         '</button>' +
                     '</div>';
 
+                // Remarks row (Infrastructure Team only)
+                if (remarksApply()) {
+                    html +=
+                        '<div class="task-remarks-row d-flex align-items-center gap-2 px-3 py-2">' +
+                            '<span class="ts-label flex-shrink-0">Remarks</span>' +
+                            '<span class="editable flex-grow-1" contenteditable="true" data-field="remarks" data-ci="' + ci + '" data-ti="' + ti + '" data-placeholder="Add remarks...">' + esc(task.remarks) + '</span>' +
+                        '</div>';
+                }
+
                 // Activities (collapsible)
                 html += '<div class="collapse show" id="' + collapseId + '">';
                 html += '<div class="activities-list">';
@@ -924,7 +1156,9 @@
             categories: categories,
             totals: calcTotals(),
             projectName: projectNameInput.value,
-            createdBy: createdByInput.value
+            createdBy: createdByInput.value,
+            projectRemark: data.projectRemark || '',
+            projectRemarkLocked: !!data.projectRemarkLocked
         }));
     }
 
@@ -1010,6 +1244,10 @@
             categories[ci].tasks[ti].buffer_hours = num;
             el.textContent = num;
             recalcTask(ci, ti);
+        }
+        else if (field === 'remarks') {
+            categories[ci].tasks[ti].remarks = val;
+            saveData();
         }
     }, true);
 
@@ -1143,7 +1381,7 @@
         fetch('/export/excel', {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-CSRFToken': window.MHES.csrfToken()},
-            body: JSON.stringify({ projectName: pName, createdBy: cBy, categories: categories })
+            body: JSON.stringify({ projectName: pName, createdBy: cBy, projectRemark: data.projectRemark || '', categories: categories })
         })
         .then(function(response) {
             if (!response.ok) {
@@ -1168,11 +1406,15 @@
             // now-redundant data as if it were still unsaved work.
             categories = [];
             data.categories = categories;
+            data.projectRemark = '';
+            data.projectRemarkLocked = false;
             projectNameInput.value = '';
             projectNameInput.classList.remove('is-invalid');
             createdByInput.value = '';
             createdByInput.classList.remove('is-invalid');
+            if (quill) quill.setText('');
             sessionStorage.removeItem('previewData');
+            applyProjectRemarkViewState();
             showEmpty();
         })
         .catch(function(err) {
@@ -1218,7 +1460,8 @@
             categories: categories,
             totals: calcTotals(),
             projectName: projectNameInput.value,
-            createdBy: createdByInput.value
+            createdBy: createdByInput.value,
+            projectRemark: data.projectRemark || ''
         });
         navigator.sendBeacon('/preview/temp/stashes', new Blob([payload], { type: 'application/json' }));
     });

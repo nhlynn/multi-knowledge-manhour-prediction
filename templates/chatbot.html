@@ -472,6 +472,23 @@
             '(<span id="summaryEstimate-' + resultId + '">0</span>h estimate + ' +
             '<span id="summaryBuffer-' + resultId + '">0</span>h buffer).</p>';
 
+        // Show the per-phase 標準/調整 breakdown columns only when the
+        // result set carries them (SSD Team). Other teams' activities
+        // have no standard_hours/adjustment_hours, so the table stays
+        // exactly as before for them.
+        var hasBreakdown = categories.some(function(c) {
+            return c.tasks.some(function(t) {
+                return t.activities.some(function(a) {
+                    return a.standard_hours !== undefined || a.adjustment_hours !== undefined;
+                });
+            });
+        });
+
+        var breakdownHeaders = hasBreakdown
+            ? '<th class="text-center">標準作業工数 (人日)</th>' +
+              '<th class="text-center">調整工数 (人日)</th>'
+            : '';
+
         // Build table with checkbox column
         var table = '<div class="table-responsive mt-2"><table class="table table-bordered align-middle mb-0">' +
             '<thead class="table-dark"><tr>' +
@@ -479,7 +496,8 @@
                 '<th class="text-center">Category</th>' +
                 '<th class="text-center">Task List</th>' +
                 '<th class="text-center">Activity Details</th>' +
-                '<th class="text-center">Activity Details Estimate (Hours)</th>' +
+                breakdownHeaders +
+                '<th class="text-center">' + (hasBreakdown ? '見積工数 (人日)' : 'Activity Details Estimate (Hours)') + '</th>' +
                 '<th class="text-center">Estimate (Hours)</th>' +
                 '<th class="text-center">Buffer (Hours)</th>' +
                 '<th class="text-center">Task Estimate (Hours)</th>' +
@@ -509,6 +527,10 @@
                     }
 
                     table += '<td>' + escHtml(act.task_detail) + '</td>';
+                    if (hasBreakdown) {
+                        table += '<td class="text-end">' + fmt2(act.standard_hours || 0) + '</td>';
+                        table += '<td class="text-end">' + fmt2(act.adjustment_hours || 0) + '</td>';
+                    }
                     table += '<td class="text-end">' + fmt2(act.estimate_hours) + '</td>';
 
                     if (firstTaskRow) {
@@ -533,7 +555,7 @@
         // updateResponseTotals, not by the backend's all-results totals.
         table += '</tbody><tfoot class="table-dark"><tr>' +
             '<td></td>' +
-            '<td colspan="3" class="fw-bold">Total (selected)</td>' +
+            '<td colspan="' + (hasBreakdown ? 5 : 3) + '" class="fw-bold">Total (selected)</td>' +
             '<td class="text-end fw-bold" id="footTaskEstimate-' + resultId + '">0</td>' +
             '<td class="text-end fw-bold" id="footEstimate-' + resultId + '">0</td>' +
             '<td class="text-end fw-bold" id="footBuffer-' + resultId + '">0</td>' +
@@ -809,7 +831,8 @@
                     categories: previewData.categories,
                     totals: previewData.totals || {},
                     projectName: previewData.projectName || '',
-                    createdBy: previewData.createdBy || ''
+                    createdBy: previewData.createdBy || '',
+                    projectRemark: previewData.projectRemark || ''
                 })
             })
             .then(function() { sessionStorage.removeItem('previewData'); })
