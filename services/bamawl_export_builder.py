@@ -748,22 +748,27 @@ def build_bamawl_workbook(
     _populate_total_manhour(wb, tasks)
     _strip_business_flow_content(wb)
 
-    # Hide only the columns whose EFFECTIVE percentage is exactly 0 --
-    # the edited value from Preview when the user changed it (matched by
-    # phase label), otherwise the template's own coefficient. Using the
-    # per-label edited value as the source of truth (not just re-reading
-    # the cell) guarantees a phase the user set to a non-zero % is never
-    # hidden, and one set to 0% always is -- exactly matching Preview.
-    # Columns are hidden, not deleted, so every Total(h)=SUM(...) formula
-    # and the TotalManhour rollup keep referencing an intact range.
+    # Set every phase column's visibility EXPLICITLY from its effective
+    # percentage: hide it when the percentage is exactly 0, and force it
+    # VISIBLE (unhide) otherwise. Setting both states -- rather than only
+    # ever hiding -- guarantees a non-zero phase can never stay hidden
+    # for any upstream reason (a pre-hidden template column, leftover
+    # state, etc.); only genuine 0% columns are hidden, exactly matching
+    # Preview. Effective % = the edited value from Preview (matched by
+    # phase label) when present, else the template's own coefficient.
+    # Columns are hidden, never deleted, so every Total(h)=SUM(...)
+    # formula and the TotalManhour rollup keep referencing an intact
+    # range.
     for label, col_idx in phase_cols:
         if col_idx is None or col_idx == base_col:
             continue
         eff = coef_by_label.get(_normalize_header(label))
         if eff is None:
             eff = ws.cell(row=COEFFICIENT_ROW, column=col_idx).value
-        if eff == 0:
-            ws.column_dimensions[get_column_letter(col_idx)].hidden = True
+        ws.column_dimensions[get_column_letter(col_idx)].hidden = (eff == 0)
+    # The base (Development) column must always be visible too.
+    if base_col is not None:
+        ws.column_dimensions[get_column_letter(base_col)].hidden = False
 
     wb.save(filepath)
     logger.info(
