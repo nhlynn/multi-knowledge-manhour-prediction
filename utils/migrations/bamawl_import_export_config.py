@@ -42,7 +42,7 @@ from database.db import get_connection, mark_migration_applied, migration_applie
 
 logger = logging.getLogger(__name__)
 
-_BAMAWL_CONFIG_MIGRATION_NAME = "seed_bamawl_import_export_config_v2"
+_BAMAWL_CONFIG_MIGRATION_NAME = "seed_bamawl_import_export_config_v3"
 
 BAMAWL_TEAM_NAME = "Bamawl Team"
 
@@ -72,7 +72,7 @@ BAMAWL_REQUIRED_SHEET_NAMES: list[str] = [
 # differently than this, even if every individually-required column
 # can still be *found* somewhere in the row, fails validation.
 BAMAWL_ALL_DETAIL_HEADERS: list[str] = [
-    "ID", "Function", "Status",
+    "ID", "Requirements", "Function", "Status",
     "\nDevelopment man-hours (h)\n", "\nCode review (h)", "Prototype(h)", "PrototypeReview(h)",
     "\n\nBusiness flow(h)", "\nBusiness flow Review\n(h)",
     "ERD(h)", "ERD Review(h)", "DFD(h)", "DFD Review(h)",
@@ -128,7 +128,16 @@ BAMAWL_IMPORT_COLUMN_MAPPING: dict[str, Any] = {
     # real function above it; this excludes it (see
     # services/excel_parser.py::_process_phases_row).
     "id_column": "ID",
-    "category": "Bamawl HR & Attendance System",
+    # Requirements is a per-row grouping label sitting above the Function
+    # (task) rows: consecutive rows sharing a Requirement belong to it,
+    # and blank cells forward-fill from the Requirement above. Feeding it
+    # as category_column (instead of the old fixed "category" literal)
+    # makes each Requirement show up as its own Category in Chatbot/
+    # Preview -- exactly the grouping Bamawl wants above its tasks. The
+    # generic phases-mode parser already supports category_column
+    # (services/excel_parser.py::_process_phases_sheet); nothing else
+    # needs to change on the import side.
+    "category_column": "Requirements",
     "phase_columns": [
         {"label": "Development", "column": "Development man-hours (h)"},
         {"label": "Code Review", "column": "Code review (h)"},

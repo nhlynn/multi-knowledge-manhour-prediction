@@ -2,15 +2,12 @@
 
 Unlike the generic export path (``services/export_workbook_service.py``,
 which builds a fresh workbook from scratch via a column-layout config),
-Bamawl Team's export is built directly on top of the git-tracked
-sanitized sample workbook (``import/bamawl/bamawl_import_template.xlsx``)
--- the same public file Template Download serves and
-``services/team_template_validator.py`` accepts on the import side, and
-structurally identical (same 7 worksheets, same ``ALL_Detail`` layout)
-to Bamawl Team's real internal workbook. The real customer workbook
-under ``simple_resource/`` (git-ignored) is no longer read anywhere at
-runtime, so export works on a clean checkout. There is deliberately no
-separate import-only or export-only template file:
+Bamawl Team's export is built directly on top of Bamawl Team's single
+official Excel workbook (``simple_resource/bamawl_import_export_format_filled.xlsx``)
+-- the same file (identical structure -- same 7 worksheets, same
+``ALL_Detail`` layout) used on the import side by
+``services/team_template_validator.py``. There is deliberately no separate
+import-only or export-only template file:
 
 - The template workbook is loaded as-is and saved back out — every
   worksheet (``ReqDefinition``, ``FunctionList``, ``TotalManhour``,
@@ -560,10 +557,10 @@ def build_bamawl_workbook(
         column_mapping: Bamawl Team's configured phases-mode column
             mapping (``sheet``, ``header_row``, ``task_column``,
             ``id_column``, ``phase_columns``, ``total_column``).
-        template_path: Path to Bamawl Team's export base template
-            (``import/bamawl/bamawl_import_template.xlsx`` -- see
-            ``BamawlExportBuilder.template_path``), the git-tracked
-            sanitized sample also used on the import side.
+        template_path: Path to Bamawl Team's single official template
+            workbook (``simple_resource/bamawl_import_export_format_filled.xlsx``
+            -- see ``routes/export.py::_bamawl_template_path``), the
+            same file used on the import side.
         project_name: The Preview page's Project Name field, used
             verbatim to replace ``ReqDefinition``'s title cell. None or
             empty leaves that cell blank (see
@@ -599,13 +596,25 @@ def build_bamawl_workbook(
     id_col = _column_index(name_to_col, column_mapping.get("id_column"))
     total_col = _column_index(name_to_col, column_mapping.get("total_column"))
     status_col = _column_index(name_to_col, STATUS_COLUMN_NAME)
+    # Requirements column: on import it's read as each task's Category
+    # (category_column), so on export write the task's category back into
+    # it. None when the template has no such column (older layout).
+    category_col = _column_index(name_to_col, column_mapping.get("category_column"))
     phase_cols = [
         (phase["label"], _column_index(name_to_col, phase["column"]))
         for phase in column_mapping.get("phase_columns", [])
     ]
     phase_cols = [(label, idx) for label, idx in phase_cols if idx is not None]
 
-    tasks = [task for cat in categories for task in cat.get("tasks", [])]
+    # Flatten tasks in category order, carrying each task's category so
+    # it can be written back into the Requirements column.
+    tasks = []
+    task_categories = []
+    for cat in categories:
+        cat_name = cat.get("category", "") or ""
+        for task in cat.get("tasks", []):
+            tasks.append(task)
+            task_categories.append(cat_name)
 
     data_start_row = header_row + 1
     capacity = _template_capacity(ws, data_start_row, task_col, phase_cols)
@@ -616,64 +625,46 @@ def build_bamawl_workbook(
             f"subtotal rows -- reduce the number of tasks, or update the template."
         )
 
-    # The exported workbook now KEEPS the template's own auto-calculate
-    # formulas: only "Development" (column D) is a literal the user
-    # edited in Preview; every derived phase column (E..AC) and the
-    # Total(h) column (AD) is the template's own formula
-    # (e.g. E6=``=D6*E$2``, chained N6*O$2, AD6=SUM(D6:AC6)), translated
-    # to each written row -- so changing Development in Excel recomputes
-    # the rest exactly as the pristine template does. Because Preview
-    # already derives every non-Development phase from Development via
-    # these same coefficients, the formula always yields the number
-    # Preview showed. (The template's row-5 リスク formula carries a stray
-    # AA47 reference to an empty cell; capturing from the canonical
-    # second data row -- see below -- uses the clean AA{row} form every
-    # other template row already has, so nothing needs "fixing".)
-    dev_col = next(
-        (idx for label, idx in phase_cols if _normalize_header(label) == _normalize_header("Development")),
+    # Bamawl's phases are all DERIVED from Development man-hours by the
+    # template's own ratio formulas (e.g. E=D*E$2, chained G=F*G$2 /
+    # O=N*O$2, Risk=(D+H+J+...)*AB$2, Management=SUM(D:Z)*AC$2), and so
+    # is Total(h) (=SUM(D:AC)). Preview now makes Development the only
+    # editable phase and computes the rest with those same ratios, so a
+    # template formula and Preview's number always agree. To keep the
+    # exported workbook's LIVE auto-calculation (change Development in
+    # Excel -> everything recomputes), we write only Development as a
+    # literal and re-inject each derived phase's + Total's original
+    # template formula, row-shifted, on every populated row. Capture
+    # those formulas from the template's first data row BEFORE clearing.
+    base_col = next(
+        (idx for label, idx in phase_cols
+         if _normalize_header(label) == _normalize_header("Development")),
         None,
     )
-    # Capture each derived phase column's and the total column's template
-    # formula BEFORE the block is cleared below, so each can be re-written
-    # (row-translated) into every populated row.
-    #
-    # Source row: the template's FIRST data row (row 5) carries RELATIVE
-    # coefficient references (e.g. E5=``=D5*E2``) and a stray ``AA47`` in
-    # リスク -- both of which would shift wrongly when translated to
-    # another row (E2 -> E3). Every SUBSEQUENT row uses the canonical
-    # ABSOLUTE-coefficient form (E6=``=D6*E$2``, ``AA6``), which
-    # translates correctly to any row (including back up to row 5), so
-    # capture from the second data row when the block has one. Only
-    # genuine formulas (leading "=") are captured; a column that isn't a
-    # formula there falls back to the old literal behavior.
-    formula_src_row = data_start_row
-    if capacity >= 2 and total_col:
-        probe = ws.cell(row=data_start_row + 1, column=total_col).value
-        if isinstance(probe, str) and probe.startswith("="):
-            formula_src_row = data_start_row + 1
-
-    captured_formulas: dict[int, str] = {}
-    for col_idx in [idx for _label, idx in phase_cols if idx != dev_col] + (
-        [total_col] if total_col else []
-    ):
-        raw = ws.cell(row=formula_src_row, column=col_idx).value
-        if isinstance(raw, str) and raw.startswith("="):
-            captured_formulas[col_idx] = raw
-
-    def _row_formula(col_idx: int, r: int) -> str:
-        """Translate a captured template formula from ``formula_src_row``
-        to row ``r`` (absolute refs like ``E$2`` stay fixed; relative
-        refs like ``D5`` shift to ``D{r}``)."""
-        origin = f"{get_column_letter(col_idx)}{formula_src_row}"
-        dest = f"{get_column_letter(col_idx)}{r}"
-        return Translator(captured_formulas[col_idx], origin=origin).translate_formula(dest)
+    formula_cols = [idx for _label, idx in phase_cols if idx != base_col]
+    if total_col:
+        formula_cols.append(total_col)
+    # Capture each column's template formula and the row it came from.
+    # Prefer the SECOND data row (data_start_row + 1): this template's
+    # very first data row uses relative coefficient refs (e.g. "=D5*E2")
+    # while every row below uses the correct absolute form ("=D6*E$2"),
+    # and only an absolute coefficient ref survives being row-shifted to
+    # other rows. Fall back to the first data row per-column if the
+    # second row has no formula there.
+    ref_row = data_start_row + 1 if capacity > 1 else data_start_row
+    template_formulas = {}  # col -> (formula, origin_row)
+    for c in formula_cols:
+        v = ws.cell(row=ref_row, column=c).value
+        origin = ref_row
+        if not (isinstance(v, str) and v.startswith("=")):
+            v = ws.cell(row=data_start_row, column=c).value
+            origin = data_start_row
+        if isinstance(v, str) and v.startswith("="):
+            template_formulas[c] = (v, origin)
 
     # Clear the template's own sample rows across the whole task-row
     # block first, so no leftover sample values (or their formulas)
-    # linger past however many real rows are written below -- rows this
-    # export doesn't populate are left fully blank (no phantom formula),
-    # so the built-in subtotal ranges (e.g. AD15=SUM(AD5:AD14)) don't
-    # pick up empty formula rows.
+    # linger past however many real rows are written below.
     for r in range(data_start_row, data_start_row + capacity):
         for c in range(1, ws.max_column + 1):
             ws.cell(row=r, column=c).value = None
@@ -692,36 +683,29 @@ def build_bamawl_workbook(
             ws.cell(row=row, column=id_col, value=i)
         ws.cell(row=row, column=task_col, value=task.get("task", ""))
 
+        # Write the task's category back into the Requirements column
+        # (the same column it was read from as category_column on import).
+        if category_col:
+            ws.cell(row=row, column=category_col, value=task_categories[i - 1])
+
         if status_col:
             status = task.get("status")
             if status:
                 ws.cell(row=row, column=status_col, value=status)
 
-        # Development (base) stays a literal -- the one phase the user
-        # edited in Preview. Every derived phase column is written as the
-        # template's own formula translated to this row, so the exported
-        # file recomputes it live in Excel (changing Development
-        # recalculates everything downstream) exactly as the pristine
-        # template does. A derived column with no captured template
-        # formula falls back to a literal.
-        for label, col_idx in phase_cols:
-            if col_idx == dev_col or col_idx not in captured_formulas:
-                ws.cell(row=row, column=col_idx).value = _phase_value(activities, label) or None
-            else:
-                ws.cell(row=row, column=col_idx).value = _row_formula(col_idx, row)
-
-        # The row's Total(h) cell is now the template's own
-        # =SUM(D:AC)-shape formula (translated to this row) rather than a
-        # pre-summed literal, so it stays live in Excel and keeps
-        # TotalManhour's own workbook formulas consistent. Falls back to
-        # a literal phase-sum only if that formula couldn't be captured.
-        if total_col:
-            if total_col in captured_formulas:
-                ws.cell(row=row, column=total_col).value = _row_formula(total_col, row)
-            else:
-                ws.cell(row=row, column=total_col).value = (
-                    sum(_phase_value(activities, lbl) for lbl, _ in phase_cols) or None
-                )
+        # Development (base) is written as a literal; every derived
+        # phase column gets its template ratio formula, translated to
+        # this row (relative refs like D5 shift to D{row}; absolute
+        # coefficient refs like E$2 stay put).
+        if base_col is not None:
+            dev_value = _phase_value(activities, "Development")
+            ws.cell(row=row, column=base_col).value = dev_value or None
+        for c, (formula, origin_row) in template_formulas.items():
+            origin = f"{get_column_letter(c)}{origin_row}"
+            dest = f"{get_column_letter(c)}{row}"
+            ws.cell(row=row, column=c).value = (
+                Translator(formula, origin=origin).translate_formula(dest)
+            )
 
         row += 1
 
@@ -782,20 +766,16 @@ class BamawlExportBuilder(BaseExportService):
 
     @staticmethod
     def template_path(app_root_path: str) -> str:
-        """Path to Bamawl Team's export base template.
+        """Path to Bamawl Team's single official Excel template.
 
-        Returns the git-tracked sanitized sample template
-        ``import/bamawl/bamawl_import_template.xlsx`` -- the same public
-        workbook Template Download serves and import validation accepts,
-        structurally identical (same 7 worksheets, same ``ALL_Detail``
-        layout) to Bamawl Team's real internal workbook; only pre-filled
-        sample cell *content* differs, which the exporter overwrites
-        anyway. Using it as the export base (the KiKan reference pattern)
-        means export works on a clean checkout: ``simple_resource/`` (the
-        real customer workbook, git-ignored) is no longer read anywhere
-        at runtime.
+        ``bamawl_import_export_format_filled.xlsx`` is the one
+        workbook used for both import
+        (``services/team_template_validator.py`` accepts an upload
+        structurally matching it) and export (this builds directly on
+        top of it) -- there is deliberately no separate import-only or
+        export-only template file (see this module's own docstring).
         """
-        return os.path.join(app_root_path, "import", "bamawl", "bamawl_import_template.xlsx")
+        return os.path.join(app_root_path, "simple_resource", "bamawl_import_export_format_filled.xlsx")
 
     def build(self, context: ExportContext) -> None:
         build_bamawl_workbook(
