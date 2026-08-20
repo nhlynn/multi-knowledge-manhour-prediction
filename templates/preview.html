@@ -1520,7 +1520,14 @@
         fetch('/export/excel', {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-CSRFToken': window.MHES.csrfToken()},
-            body: JSON.stringify({ projectName: pName, createdBy: cBy, projectRemark: data.projectRemark || '', categories: categories })
+            body: JSON.stringify({
+                projectName: pName, createdBy: cBy,
+                projectRemark: data.projectRemark || '',
+                phaseCoefficients: hasPhaseFormula()
+                    ? PHASE_FORMULA.derived.map(function(d) { return { label: d.label, coef: d.coef }; })
+                    : [],
+                categories: categories
+            })
         })
         .then(function(response) {
             if (!response.ok) {

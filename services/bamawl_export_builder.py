@@ -110,6 +110,11 @@ logger = logging.getLogger(__name__)
 # FunctionList isn't part of Bamawl Team's import column_mapping (it's
 # an export-only, informational sheet in the template -- see module
 # docstring), so its sheet/column layout is fixed here instead.
+# ALL_Detail's row-2 ratio/coefficient cells the derived-phase formulas
+# multiply by (e.g. =E5*F$2). Edited percentages are written here on
+# export so the formulas recompute with them.
+COEFFICIENT_ROW = 2
+
 FUNCTION_LIST_SHEET = "FunctionList"
 FUNCTION_LIST_HEADER_ROW = 1
 FUNCTION_LIST_NO_COLUMN = 2  # "No."
@@ -541,6 +546,7 @@ def build_bamawl_workbook(
     column_mapping: dict[str, Any],
     template_path: str,
     project_name: str | None = None,
+    phase_coefficients: list[dict[str, Any]] | None = None,
 ) -> None:
     """Populate Bamawl Team's own Excel template with system data and
     save it to ``filepath``.
@@ -662,6 +668,26 @@ def build_bamawl_workbook(
         if isinstance(v, str) and v.startswith("="):
             template_formulas[c] = (v, origin)
 
+    # Apply the user's edited percentages (from Preview) to the
+    # template's coefficient row (row 2), matched by phase label. The
+    # derived-phase formulas reference these cells (e.g. =E5*F$2), so the
+    # exported workbook recomputes with the adjusted percentages instead
+    # of the template's originals — and stays live (change Development in
+    # Excel → everything follows the edited %). Written before the task
+    # loop and the 0%-column hiding below, so both see the edited values.
+    coef_by_label = {
+        _normalize_header(c.get("label")): c.get("coef")
+        for c in (phase_coefficients or [])
+        if c.get("label") is not None and c.get("coef") is not None
+    }
+    if coef_by_label:
+        for label, col_idx in phase_cols:
+            if col_idx == base_col:
+                continue
+            coef = coef_by_label.get(_normalize_header(label))
+            if coef is not None:
+                ws.cell(row=COEFFICIENT_ROW, column=col_idx, value=coef)
+
     # Clear the template's own sample rows across the whole task-row
     # block first, so no leftover sample values (or their formulas)
     # linger past however many real rows are written below.
@@ -721,6 +747,23 @@ def build_bamawl_workbook(
     _blank_req_definition_sections(wb)
     _populate_total_manhour(wb, tasks)
     _strip_business_flow_content(wb)
+
+    # Hide only the columns whose EFFECTIVE percentage is exactly 0 --
+    # the edited value from Preview when the user changed it (matched by
+    # phase label), otherwise the template's own coefficient. Using the
+    # per-label edited value as the source of truth (not just re-reading
+    # the cell) guarantees a phase the user set to a non-zero % is never
+    # hidden, and one set to 0% always is -- exactly matching Preview.
+    # Columns are hidden, not deleted, so every Total(h)=SUM(...) formula
+    # and the TotalManhour rollup keep referencing an intact range.
+    for label, col_idx in phase_cols:
+        if col_idx is None or col_idx == base_col:
+            continue
+        eff = coef_by_label.get(_normalize_header(label))
+        if eff is None:
+            eff = ws.cell(row=COEFFICIENT_ROW, column=col_idx).value
+        if eff == 0:
+            ws.column_dimensions[get_column_letter(col_idx)].hidden = True
 
     wb.save(filepath)
     logger.info(
@@ -783,4 +826,5 @@ class BamawlExportBuilder(BaseExportService):
         build_bamawl_workbook(
             context.filepath, context.categories, context.column_mapping,
             context.template_path, project_name=context.project_name,
+            phase_coefficients=context.phase_coefficients,
         )

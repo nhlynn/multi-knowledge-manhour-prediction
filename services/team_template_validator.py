@@ -91,6 +91,14 @@ class TeamTemplateSpec:
     column_mapping: dict[str, Any]
     template_version: str | None = None
     sample_template_path: tuple[str, ...] | None = None
+    # When set, header validation only requires these columns to be
+    # PRESENT in header_sheet's header row (matched whitespace/case-
+    # tolerantly, in any position) rather than the whole
+    # ``expected_headers`` list matching exactly and in order. Lets a
+    # team accept uploads that carry the essential columns even if other
+    # columns differ, are reordered, or are added/removed. None keeps
+    # the strict exact-match behaviour (every other team).
+    required_columns: list[str] | None = None
 
 
 def _rewind(source: Any) -> None:
@@ -152,8 +160,13 @@ def validate_team_template(source: Any, spec: TeamTemplateSpec) -> None:
     finally:
         _rewind(source)
 
-    # 1) Required worksheet names exist.
-    missing_sheets = [s for s in spec.required_sheet_names if s not in sheet_names]
+    # 1) Required worksheet names exist. In lenient mode (required_columns
+    # set) only the header sheet -- the one actually read on import -- is
+    # required; the other template sheets are optional.
+    sheets_needed = (
+        [spec.header_sheet] if spec.required_columns else spec.required_sheet_names
+    )
+    missing_sheets = [s for s in sheets_needed if s not in sheet_names]
     if missing_sheets:
         wb.close()
         raise TeamTemplateError(
@@ -191,23 +204,41 @@ def validate_team_template(source: Any, spec: TeamTemplateSpec) -> None:
         wb.close()
         _rewind(source)
 
-    for position, expected in enumerate(spec.expected_headers, start=1):
-        actual = actual_headers[position - 1] if position <= len(actual_headers) else None
-        if actual != expected:
-            # Distinguish "this exact column exists, just somewhere
-            # else in the row" (a reordering) from "this column isn't
-            # in the row at all" (genuinely missing/renamed).
-            if expected in actual_headers:
-                reason = "Invalid column order"
-            else:
-                reason = f"Missing required column: {expected.strip()}"
-            raise TeamTemplateError(
-                f"This file doesn't match the official {spec.team_name} template: "
-                f"column {position} in '{spec.header_sheet}' (row {spec.header_row}) should be "
-                f"{expected!r} but found {actual!r}. Column names and order must "
-                f"match the official template exactly.",
-                reason=reason,
-            )
+    if spec.required_columns:
+        # Lenient mode: only require the essential columns to be present
+        # somewhere in the header row, matched whitespace/case-tolerantly
+        # (the same way excel_parser reads them). Order and any extra
+        # columns don't matter.
+        from services.excel_parser import _normalize_header
+
+        present = {_normalize_header(h) for h in actual_headers if h is not None}
+        for required in spec.required_columns:
+            if _normalize_header(required) not in present:
+                raise TeamTemplateError(
+                    f"This file doesn't look like the {spec.team_name} template: "
+                    f"the '{spec.header_sheet}' worksheet (row {spec.header_row}) is missing "
+                    f"the required column {required.strip()!r}. It must contain at least: "
+                    f"{', '.join(c.strip() for c in spec.required_columns)}.",
+                    reason=f"Missing required column: {required.strip()}",
+                )
+    else:
+        for position, expected in enumerate(spec.expected_headers, start=1):
+            actual = actual_headers[position - 1] if position <= len(actual_headers) else None
+            if actual != expected:
+                # Distinguish "this exact column exists, just somewhere
+                # else in the row" (a reordering) from "this column isn't
+                # in the row at all" (genuinely missing/renamed).
+                if expected in actual_headers:
+                    reason = "Invalid column order"
+                else:
+                    reason = f"Missing required column: {expected.strip()}"
+                raise TeamTemplateError(
+                    f"This file doesn't match the official {spec.team_name} template: "
+                    f"column {position} in '{spec.header_sheet}' (row {spec.header_row}) should be "
+                    f"{expected!r} but found {actual!r}. Column names and order must "
+                    f"match the official template exactly.",
+                    reason=reason,
+                )
 
     # 5) Template version, if a version marker is configured for this team.
     if spec.template_version is not None:

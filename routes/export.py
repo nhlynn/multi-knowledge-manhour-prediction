@@ -129,7 +129,7 @@ def _current_team_name() -> str | None:
 
 def _select_export_strategy(
     build_path: str, project_name: str, created_by: str, categories: list,
-    project_remark: str = "",
+    project_remark: str = "", phase_coefficients: list | None = None,
 ) -> tuple:
     """Select this export's Strategy Pattern object and build its
     ``ExportContext`` (see ``services/base_export_service.py``,
@@ -164,6 +164,7 @@ def _select_export_strategy(
                 created_by=created_by,
                 column_mapping=bamawl_mapping,
                 template_path=BamawlExportBuilder.template_path(current_app.root_path),
+                phase_coefficients=phase_coefficients,
             )
     elif strategy_cls is KikanExportBuilder:
         kikan_mapping = KikanExportBuilder.resolve_column_mapping(
@@ -211,6 +212,7 @@ def export_excel():
     project_name = (data.get("projectName") or "").strip()
     created_by = (data.get("createdBy") or "").strip()
     project_remark = data.get("projectRemark") or ""
+    phase_coefficients = data.get("phaseCoefficients") or []
     categories = data.get("categories", [])
 
     if not project_name:
@@ -227,7 +229,7 @@ def export_excel():
     os.makedirs(temp_dir, exist_ok=True)
     build_path = os.path.join(temp_dir, build_export_filename(safe_name))
 
-    strategy, context = _select_export_strategy(build_path, project_name, created_by, categories, project_remark)
+    strategy, context = _select_export_strategy(build_path, project_name, created_by, categories, project_remark, phase_coefficients)
 
     try:
         strategy.build(context)

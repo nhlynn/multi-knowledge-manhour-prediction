@@ -215,6 +215,14 @@ def _build_bamawl_template_spec() -> Any:
         header_sheet=BAMAWL_IMPORT_COLUMN_MAPPING["sheet"],
         header_row=BAMAWL_IMPORT_COLUMN_MAPPING["header_row"],
         expected_headers=BAMAWL_ALL_DETAIL_HEADERS,
+        # Bamawl accepts any ALL_Detail whose header row carries at least
+        # these essential columns (matched whitespace/case-tolerantly, in
+        # any position) -- other/extra/reordered phase columns are fine.
+        # The full BAMAWL_ALL_DETAIL_HEADERS stays as documentation and
+        # for the exact-match path other teams still use.
+        required_columns=[
+            "ID", "Requirements", "Function", "Development man-hours (h)",
+        ],
         column_mapping=BAMAWL_IMPORT_COLUMN_MAPPING,
         template_version=BAMAWL_TEMPLATE_VERSION,
         sample_template_path=("import", "bamawl", "bamawl_import_template.xlsx"),

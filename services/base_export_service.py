@@ -49,6 +49,11 @@ class ExportContext:
     template_path: str | None = None
     template_config: dict[str, Any] | None = None
     project_remark: str = ""
+    # Edited phase percentages from Preview (list of {"label", "coef"}),
+    # written into the export template's coefficient row so a formula
+    # team's export reflects the user's adjusted percentages rather than
+    # the template's originals. None/empty keeps the template defaults.
+    phase_coefficients: list[dict[str, Any]] | None = None
 
 
 class BaseExportService(ABC):
