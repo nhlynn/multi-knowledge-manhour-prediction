@@ -650,7 +650,14 @@ team's display name never leak into a filesystem path.
   team's data anywhere in the object graph a request can reach.
 - **`app.py`** — `inject_missing_embeddings` (sidebar badge) and
   `/dashboard` now resolve the same way from `session["team_id"]`
-  (skipping/returning zero when logged out, rather than erroring).
+  (skipping/returning zero when logged out, rather than erroring). The
+  dashboard (`app.py::_render_dashboard`) is team-scoped for a Team
+  Manager, but **system-wide for an Admin**: it aggregates
+  Knowledge/Embedded file counts across *all* teams (knowledge is
+  imported under the estimation teams, never the Admin's own, so a
+  team-scoped Admin view would read 0), skipping any team whose folders
+  can't be resolved. Admin lands on this dashboard at `/`; a Team
+  Manager lands on the AI Chatbot.
 - **`utils/migration.py::migrate_kb_to_team_storage`** — the one-shot
   migration that moves existing data (§ Migration process, below).
 
@@ -944,10 +951,21 @@ Team's configured column spec  ->  _build_workbook (shared: merges, totals, rema
   (remarks) — with no `working_day` column, demonstrating both
   relabeling and dropping a column.
 
-**Explicitly unchanged:** the Remark section's rich-text rendering
-(`services/remark_html.py`), all styling primitives (fonts/fills/borders),
+**Explicitly unchanged:** all styling primitives (fonts/fills/borders)
 and the per-category merge mechanics — these are shared, structural
 concerns, identical for every team's export regardless of template.
+
+> **Note:** `_build_workbook` (with its Remark rendering) has since moved
+> out of `routes/export.py` into
+> `services/export_workbook_service.py::build_workbook`, dispatched via
+> the `DefaultExportStrategy` (see §5j). Its **Remark** section — the
+> Infrastructure-Team-only project remark — is converted from Preview's
+> sanitized HTML to an openpyxl `CellRichText` (bold/italic/color and
+> bullet/numbered list structure preserved; underline is intentionally
+> dropped, since the Preview's Quill toolbar offers no underline), and
+> per-task remarks go to the `remarks` column. The renderer is in
+> `export_workbook_service.py` itself; the older `services/remark_html.py`
+> is no longer imported by any route/service.
 
 **Deliberately not done (per explicit scope agreement before
 implementation):** no UI to view/edit a team's export template — same
@@ -1020,7 +1038,8 @@ intermediate `all_categories` structure changed.
   "sheet": "ALL_Detail",
   "header_row": 4,
   "task_column": "Function",
-  "category": "Bamawl ERP",
+  "id_column": "ID",
+  "category_column": "Requirements",
   "phase_columns": [
     {"label": "Development", "column": "Development man-hours (h)"},
     {"label": "Code Review", "column": "Code review (h)"},
@@ -1033,7 +1052,11 @@ intermediate `all_categories` structure changed.
 - `category_column` *or* `category` (one required) — either read a real
   grouping column per row (forward-filled, like the flat mode's category
   handling), or apply one fixed literal category name to every row (for
-  files with no grouping column at all, e.g. Bamawl's `ALL_Detail`).
+  files with no grouping column at all). Bamawl's `ALL_Detail` uses
+  `category_column: "Requirements"` — each Requirement value becomes a
+  Category above its tasks (blank cells forward-fill from the Requirement
+  above). Its export writes each task's category back into that same
+  Requirements column, so the grouping round-trips.
 - `phase_columns` (required, ≥1) — each becomes one Activity Detail.
   Column names are matched whitespace/newline-tolerant and
   case-insensitively (`_find_column`/`_normalize_header`), since these
@@ -1044,6 +1067,17 @@ intermediate `all_categories` structure changed.
   disagrees with this column's value by more than 0.5h for a row (a
   signal that a phase column was missed or mismatched, not a hard
   failure).
+- `id_column` (optional) — a column that must hold a real number for a
+  row to count as a task row (checked *before* `task_column`'s
+  forward-fill), so a trailing per-role subtotal/rollup block (blank or
+  label-text id, but numeric phase values) isn't folded into the last
+  real task above it.
+- `extra_columns` (optional) — a list of `{"field": ..., "column": ...}`
+  entries; each resolved column's value is set verbatim on the task's
+  `field` key and passed through generically all the way to
+  Preview/export (e.g. Bamawl's and KiKan's own `Status` column). Not
+  for cross-row accumulation or a second worksheet — those still need a
+  dedicated parser.
 
 A row with no task name (typically a group-rollup/summary row in these
 workbooks) or with every phase at zero/blank is skipped, same spirit as
@@ -1067,6 +1101,135 @@ inferable from the header text alone.
 
 See `docs/DATABASE.md` §11 (updated) for how a `team_import_configs` row
 now supports either mapping shape.
+
+## 5j. Per-Team Excel Export, Phase Formulas & Template Validation
+
+The import side (§5g/§5i) has a mirror on the export side, plus two
+teams whose Preview/export is driven by per-phase auto-calculation and a
+strict-vs-lenient template validator. Everything here dispatches by team
+**name** — no route holds team-specific logic of its own.
+
+### Export Strategy Pattern
+
+`routes/export.py::export_excel` no longer branches through an
+if/elif chain of free functions; it delegates to a Strategy Pattern:
+
+- **`services/base_export_service.py`** — `BaseExportService` (one
+  `build(context)` method) and `ExportContext`, the dataclass carrying
+  everything a strategy might need: `filepath`, `categories`,
+  `project_name`, `created_by`, and the optional
+  `column_mapping`/`template_path`/`template_config`/`project_remark`/
+  `phase_coefficients` (each strategy uses only the fields it needs).
+- **`services/export_strategies.py`** — `EXPORT_STRATEGY_REGISTRY` maps
+  a team name to its `BaseExportService` subclass: `Bamawl Team →
+  BamawlExportBuilder`, `KiKan Team → KikanExportBuilder`, `SGL Team →
+  SglExportBuilder`, `SSD Team → SsdExportBuilder`; every other team
+  gets `DefaultExportStrategy` (which delegates to
+  `services/export_workbook_service.py::build_workbook`, the
+  column-layout renderer of §5h).
+- **`routes/export.py::_select_export_strategy`** builds the right
+  `ExportContext` per team. Bamawl/KiKan are still config-gated (their
+  own `resolve_column_mapping` must return a seeded mapping, else they
+  fall back to `DefaultExportStrategy`); SGL/SSD dispatch
+  unconditionally (they derive structure from the template itself, with
+  no DB `column_mapping`). Each builder lives in its own module and owns
+  its own `*ExportError`, caught individually in `export_excel` and
+  surfaced to the client as a 400.
+
+### Per-phase auto-calculation (Bamawl & KiKan)
+
+Both teams' Excel templates derive every phase from a single
+**Development** man-hours input via fixed ratio coefficients. That
+formula is encoded once, on the backend:
+
+- **`routes/preview.py`** holds `_BAMAWL_PHASE_FORMULA` and
+  `_KIKAN_PHASE_FORMULA` — each a `{"base": "Development", "derived":
+  [{"label", "of": [...], "coef"}]}` spec whose `derived` list is
+  dependency-ordered (each phase's inputs precede it) and mirrors the
+  template's own row-2 coefficients / row-5 formulas.
+  `_phase_formula_for_team(team_name)` returns the right one (or `None`),
+  injected into the Preview as `PHASE_FORMULA`.
+- **`templates/preview.html`** makes only the base phase editable;
+  derived phases are read-only and recomputed live (`applyPhaseFormula`
+  → `recalcAllTasks`). On load, `computeCoefsFromFirstTask` adopts the
+  **first task's** implied ratios as the default percentages, then
+  **every task is recomputed uniformly** so a project assembled from
+  several source workbooks uses one consistent set.
+- A collapsible **Percentage (%)** panel (`renderCoefPanel`) lets the
+  user edit each derived phase's coefficient as a percent; a change
+  recomputes every task (`recalcAllTasks`), re-renders, and persists.
+  New tasks use the current percentages. Phases whose coefficient is 0
+  are hidden in the UI (kept in the data as 0).
+
+### `phaseCoefficients` flow (Preview ↔ backend ↔ export)
+
+The edited percentages travel to the export so the workbook computes
+with the user's adjusted ratios:
+
+```
+preview.html  →  POST /export/excel {phaseCoefficients: [{label, coef}]}
+              →  routes/export.py::export_excel
+              →  ExportContext.phase_coefficients
+              →  services/bamawl_export_builder.py (written into the
+                 template's coefficient row, row 2, matched by label)
+```
+
+### Live-formula preservation on export
+
+Bamawl's and KiKan's builders keep the exported workbook's formulas
+live (change Development in Excel → everything recomputes):
+
+- Only **Development** is written as a literal; every derived phase and
+  the row total keep the template's own formula, captured from a
+  representative data row and re-injected per row via
+  `openpyxl.formula.translate.Translator` (relative refs like `D5`
+  shift with the row; absolute coefficient refs like `E$2` stay put).
+  Bamawl deliberately captures from the *second* data row, whose
+  coefficient refs are already absolute.
+- Edited `phase_coefficients` are written into the template's
+  **coefficient row (row 2)**, so the live formulas compute with the
+  user's percentages.
+- Bamawl **hides** (never deletes) any phase column whose effective
+  percentage is 0, and explicitly forces non-zero columns visible, so
+  every `Total(h)=SUM(...)` and `TotalManhour` formula keeps
+  referencing an intact range.
+- SGL and SSD deliberately stay **literal** — SSD because its template
+  has `標準作業工数` VLOOKUP-driven special rows whose values must be
+  fixed at export time rather than left to recalculate.
+
+The Preview's **Buffer** field is shown only for teams in
+`BUFFER_EXPORT_TEAMS` (Infrastructure Team — the only export that uses
+`total_hours = estimate + buffer`); Bamawl/KiKan/SGL/SSD Totals are just
+the sum of phase columns. The project-level **Remark** editor and
+per-task Remarks are gated on `REMARKS_TEAMS` (Infrastructure Team only).
+
+### Template validation & resolution
+
+- **`services/team_template_validator.py`** — `TeamTemplateSpec`
+  (per-team: required sheet names, header sheet/row, expected headers,
+  `column_mapping`, optional `sample_template_path`, optional
+  `template_version`) and `validate_team_template()`. By default the
+  header check is strict (exact, position-by-position). A spec that sets
+  **`required_columns`** switches to a lenient check: only those columns
+  must be present in the header sheet (whitespace/case-tolerant, any
+  order, extra columns allowed) and only the header sheet is required.
+  **Bamawl** sets `required_columns=[ID, Requirements, Function,
+  Development man-hours (h)]` in
+  `utils/migrations/bamawl_import_export_config.py`; every other
+  registered team keeps the strict check.
+- **`services/team_template_registry.py`** — `get_team_template_spec`
+  returns a team's registered spec (Bamawl/KiKan/SGL/SSD) or `None`
+  (generic lenient parser, no structural validation).
+- **Template resolution / `simple_resource/` fallback** —
+  `simple_resource/` holds the real customer workbooks, is **git-ignored**,
+  and is absent on a clean deploy; the app no longer reads it at
+  runtime. Each specially-supported team's `template_path()` and
+  `fixed_phase_labels()` now use the git-tracked
+  `import/<team>/<team>_import_template.xlsx` (Bamawl's export
+  `template_path` points there too; SGL/SSD read their fixed phase
+  labels from that same sample). The sample files share the real
+  workbooks' column structure, so validation, fixed-phase resolution,
+  and export all work without `simple_resource/`.
 
 ## 6. AI Chatbot Flow
 
@@ -1197,6 +1360,12 @@ purged on a schedule.
 - Each stash is a row: `id`, `stash_type` (always `"preview"`),
   `project_name`, `created_by`, `project_remark`, `json_data` (JSON text
   containing `categories` and `totals`), `created_at`, `expires_at`.
+  `project_remark` carries the Infrastructure-Team-only project-level
+  rich-text Remark (empty for every other team); both `create_stash`
+  and the chatbot's stash POST send it as `projectRemark`, and
+  `scheduler/temp_data_service.py` stores it in its own column *and*
+  mirrors it inside `json_data`, so a restore recovers it either way.
+  It is shown on the stash detail page.
 - `templates/temp_data.html` lists all stashes; **Restore to Preview**
   merges one stash's categories back into the active `previewData` (by
   category+source, same rule used when adding chatbot results) and deletes

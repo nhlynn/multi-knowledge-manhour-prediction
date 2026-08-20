@@ -8,9 +8,9 @@
 
 **Company Name:** (To Be Confirmed)
 
-**Version:** 1.1
+**Version:** 1.2
 
-**Date:** 2026-07-22
+**Date:** 2026-08-20
 
 **Document Number:** (To Be Confirmed)
 
@@ -22,6 +22,7 @@
 |---|---|---|---|
 | 1.0 | 2026-07-17 | Initial release of the User Manual | (To Be Confirmed) |
 | 1.1 | 2026-07-22 | Added login/authentication, user roles (Admin/Team Manager/Member), team-isolated Knowledge Base and Export History, and the Manage Users/Manage Teams admin screens | (To Be Confirmed) |
+| 1.2 | 2026-08-20 | Documented per-team Preview behaviors: Development-driven auto-calculation with the editable Percentage (%) panel (Bamawl/KiKan), the fixed-phase and SSD 標準/調整/見積 teams, the Infrastructure-only Remark (no underline) and Buffer fields, Bamawl's Requirements-as-Category grouping and relaxed import check, reading exported live-formula/hidden-0%-column workbooks, and the Admin system-wide Dashboard | (To Be Confirmed) |
 
 ---
 
@@ -82,7 +83,7 @@ It does not cover source code, internal architecture, or database/file-storage d
 | Category | The top level of the estimation hierarchy (e.g., a project or system type) |
 | Task | A unit of work within a Category |
 | Activity / Activity Detail | A specific action within a Task, with its own estimated hours |
-| Buffer | Additional hours added to a Task to account for contingency |
+| Buffer | Additional hours added to a Task to account for contingency. Only the **Infrastructure Team** export uses it (its Total = estimate + buffer); the other teams' Total is simply the sum of their phase columns, so the Buffer field is shown only for Infrastructure Team |
 | Preview | The screen where a user assembles and edits an estimate before exporting it |
 | Stash / Temporary Data | An automatic server-side backup of in-progress Preview data |
 | Embedding | The AI-generated representation of text used to power semantic search (internal process; not user-configured) |
@@ -112,6 +113,7 @@ MHES supports multiple teams, each with its own login accounts, Knowledge Base, 
 - **Excel Export** — Generates a professionally formatted `.xlsx` estimate file for download, recorded in your team's Export History.
 - **Temporary Data (Preview Stashing)** — In-progress Preview data is automatically backed up on the server and can be restored later.
 - **Administration (Admin only)** — Read-only Manage Users and Manage Teams screens for reviewing every account and team in the system.
+- **Dashboard** — Shows Knowledge Base file and embedding counts. For a Team Manager these are scoped to their own team; for an Admin they are aggregated across **all** teams, so the dashboard reflects the whole system (an Admin lands here after login instead of on the AI Chatbot).
 
 ### System Workflow
 
@@ -390,6 +392,8 @@ Requires the **Admin** or **Team Manager** role. Members attempting to reach thi
 - Deleting a file asks for confirmation: "Delete {filename}? This cannot be undone."
 - Some teams may have a customized set of expected Excel column headers (e.g. a team using "Feature"/"Technology"/"Hours" instead of the default "Task List"/"Category"/"Estimate (Hours)"). If your team's files use different headers than the downloadable template shows, ask your system administrator whether your team has a custom column mapping configured.
 - Some teams' files break one task's hours down across several phase columns (e.g. Development, Code Review, QA, Testing, Risk, Management — each its own column, adding up to a grand total column). For teams configured this way, every one of those phase columns is imported as its own searchable Activity under the task — not just the grand total — so the detailed breakdown stays available for future estimates, not only the final number.
+- **Bamawl Team** groups its tasks by a **Requirements** column: each Requirement value becomes a Category shown above its tasks in the Chatbot and Preview (blank Requirement cells inherit the one above them).
+- **Bamawl Team's upload check is relaxed:** a file is accepted as long as its `ALL_Detail` worksheet contains at least the **ID, Requirements, Function,** and **Development man-hours (h)** columns (matched ignoring case/spacing, in any order — extra columns are fine, and the other template worksheets are optional). Other teams still require their template's columns to match exactly.
 
 ---
 
@@ -428,8 +432,9 @@ Lets a user assemble, review, and edit the Category → Task → Activity estima
 |---|---|---|
 | 1 | "Project Name" field | Required text field for the estimate's project name |
 | 2 | "Created By" field | Required text field for the preparer's name |
-| 3 | "Remark" rich-text editor | Formatting toolbar: Bold, Italic, Underline, Color, Bullet list, Numbered list, Undo, Redo |
-| 4 | Category/Task/Activity table | Editable hierarchy with inline-editable fields (category name, task name, task remarks, buffer hours, activity name, activity hours) |
+| 3 | "Remark" rich-text editor | Formatting toolbar: Bold, Italic, text Color, Bullet list, Numbered list, Undo, Redo (there is **no underline**). Shown for the **Infrastructure Team** only |
+| 4 | Category/Task/Activity table | Editable hierarchy with inline-editable fields (category name, task name, activity name, and — depending on the team — activity hours or a single editable Development man-hours field; per-task remarks and buffer hours appear for the Infrastructure Team only) |
+| 4a | "Percentage (%)" panel | For teams whose phases are auto-calculated (Bamawl, KiKan): a collapsible panel to edit each derived phase's percentage. Starts collapsed; editing a % recalculates every task's man-hours |
 | 5 | "Add Category" button | Adds a new blank category |
 | 6 | Per-task "Add Activity" button | Adds a new activity row under a task |
 | 7 | Per-row "×" delete buttons | Removes a category, task, or activity |
@@ -471,6 +476,9 @@ Requires a logged-in session (any role: Admin, Team Manager, or Member).
 **Notes**
 
 - If the browser tab is closed, refreshed, or navigated away from (outside the application) while there is unsaved Preview data, it is automatically saved to Temporary Data.
+- **Auto-calculated phases (Bamawl, KiKan):** for these teams you enter only a single **Development** man-hours value per task; every other phase (Code Review, Testing, Management, …) is computed automatically from it and shown as read-only. The **Percentage (%)** panel lets you adjust each phase's ratio: the default percentages are taken from the first task on load and applied uniformly to every task (so a project assembled from several source workbooks uses one consistent set), and editing any percentage instantly recalculates every task — including tasks added afterward. Phases whose percentage is 0 are hidden from the screen (they are still exported as 0).
+- **Team-specific fields:** the project **Remark** editor and per-task **Remarks/Buffer** fields appear only for the Infrastructure Team. SGL and SSD tasks have a fixed set of phase columns (you cannot add a free-form activity); SSD additionally shows each phase's 標準 (standard) / 調整 (adjustment) / 見積 (estimate) breakdown.
+- Collapsing a task keeps it collapsed while you keep working — clicking **Add Task** or **Add Category** no longer re-expands tasks you had collapsed.
 - Attempting to export without a Project Name, Created By value, or any category data returns one of: "Project name is required.", "Created By is required.", or "No data to export."
 - Exporting does **not** add any new Category, Task, or Activity data back into the Knowledge Base — it only produces the downloadable Excel file. To add new data to the Knowledge Base, it must be uploaded on the Upload Files screen.
 
@@ -973,6 +981,8 @@ Requires the **Admin** role. Team Managers and Members attempting to reach this 
 **Error Cases:** See Section 6, Error Messages.
 
 **Notes:** Exporting does **not** modify the Knowledge Base — it only produces the downloadable Excel file and a record in Export History. The only way new data enters the Knowledge Base is by uploading a file on the Upload Files screen.
+
+**Reading a Bamawl or KiKan exported file:** the downloaded workbook keeps its own live Excel formulas. Only the **Development** man-hours is written as a plain number; every other phase and the row total are formulas, so if you change a Development value in Excel the whole row recalculates automatically (exactly as the team's template does). Any adjusted percentages from the Preview's Percentage (%) panel are written into the template's coefficient row, so the formulas compute with your chosen percentages. Phase columns you set to 0% are **hidden** (not deleted) — the total formulas still reference the full range, and you can unhide those columns in Excel if you want to see them.
 
 ---
 

@@ -160,7 +160,7 @@ used across the multi-team phases:
 
 | Mechanism | Tracked how | Used by |
 |---|---|---|
-| One-shot startup migrations | `db_migrations` table (`database/db.py`), checked/marked by `utils/migration.py` on every `app.py` startup | `stashes_json_to_sqlite_v1`, `merge_legacy_dbs_into_mhes_v1`, `create_default_team_v1`, `migrate_kb_to_team_storage_v1`, `create_default_admin_user_v1`, `seed_development_team_import_config_v1`, `seed_development_team_export_template_v1` |
+| One-shot startup migrations | `db_migrations` table (`database/db.py`), checked/marked by `utils/migration.py` on every `app.py` startup | `stashes_json_to_sqlite_v1`, `merge_legacy_dbs_into_mhes_v1`, `create_default_team_v1`, `migrate_kb_to_team_storage_v1`, `create_default_admin_user_v1`, `seed_development_team_import_config_v1`, `seed_development_team_export_template_v1`, and each specially-supported team's own import/export config seed (`seed_bamawl_import_export_config_v3`, plus KiKan/SGL/SSD's equivalents in `utils/migrations/{team}_import_export_config.py`) |
 | Lazy ALTER-if-missing | Checked via `PRAGMA table_info(...)` inside the owning service's own `__init__`, not `db_migrations` | `export_history.file_path` (pre-existing), `export_history.team_id`/`created_by_user_id` (Phase 6) — both in `ExportHistoryService._ensure_*_column(s)` |
 
 | Table | Introduced | Columns added later | Backfill for pre-existing rows |
@@ -398,7 +398,7 @@ MHES has no authentication system.
 | `stash_type` | TEXT | Always `"preview"` for Preview stashes (reserved for future stash types) |
 | `project_name` | TEXT | Project name from Preview at the time of stashing (may be empty) |
 | `created_by` | TEXT | "Created By" value from Preview at the time of stashing (may be empty) |
-| `project_remark` | TEXT | Project Remark HTML from Preview at the time of stashing (may be empty) |
+| `project_remark` | TEXT | Project-level rich-text Remark HTML from Preview at stash time (may be empty). Populated for **Infrastructure Team** only — the sole team whose Preview shows the project Remark editor (`scheduler/temp_data_service.py` writes it here, and also mirrors it inside `json_data` as `projectRemark`, so a restore recovers it either way). Empty for every other team |
 | `json_data` | TEXT (JSON) | `{"categories": [...], "totals": {...}}` — same Category → Task → Activity shape used on the Preview screen (not the Mapping JSON shape in §5 — no `id`/`text` fields, just `category`, `source`, `tasks[].task/estimate_hours/buffer_hours/total_hours/activities[].task_detail/estimate_hours`) |
 | `created_at` | TEXT (ISO datetime, naive/local) | `datetime.now().isoformat()` at stash time; also the basis for expiry |
 | `expires_at` | TEXT (ISO datetime), nullable | Currently always `NULL` for Preview stashes; expiry is instead computed from `created_at` + retention days (see Lifecycle below) |
@@ -667,19 +667,27 @@ opaque JSON blob to this table):
      "sheet": "ALL_Detail",
      "header_row": 4,
      "task_column": "Function",
-     "category": "Bamawl ERP",
+     "id_column": "ID",
+     "category_column": "Requirements",
      "phase_columns": [
        {"label": "Development", "column": "Development man-hours (h)"},
        {"label": "Code Review", "column": "Code review (h)"}
      ],
-     "total_column": "Total(h)"
+     "total_column": "Total(h)",
+     "extra_columns": [{"field": "status", "column": "Status"}]
    }
    ```
    `sheet`/`header_row` also fix a real-world problem flat-mode files
    didn't have: some teams' actual workbooks have their header row
    several rows down (a percentage/phase-group block sits above it),
    which `excel_parser`'s default row-1-header assumption can't handle
-   without this override.
+   without this override. `category_column` reads a real per-row
+   grouping column (forward-filled) as each task's Category — Bamawl's
+   `ALL_Detail` uses its **Requirements** column this way, so each
+   Requirement becomes a Category above its tasks (replacing the older
+   fixed `"category"` literal). `extra_columns` captures any other
+   same-row column verbatim onto the task (Bamawl/KiKan use it for
+   `Status`).
 
 Indexed on `team_id` (`idx_team_import_configs_team_id`).
 
@@ -710,12 +718,16 @@ a team's Excel files, never their content.
   returns `None`) parses using only the original generic keyword
   matching — byte-identical to every KB file parsed before Phase 7.
 - **No delete operation exists yet.**
-- **Not yet seeded for phases mode**: as of this writing, only the flat
-  demo mapping (`seed_development_team_import_config`) has a seed
-  migration; Bamawl/KiKan/SGL's real phases-mode configs (matching their
-  actual `simple_resource/*_import_export_format.xlsx` files) are set up
-  directly via `TeamImportConfigRepository.upsert()`, not a tracked
-  migration.
+- **Seeded for phases mode**: in addition to the flat demo mapping
+  (`seed_development_team_import_config`), Bamawl/KiKan/SGL/SSD each now
+  have their own tracked one-shot seed migration
+  (`utils/migrations/{bamawl,kikan,sgl,ssd}_import_export_config.py`)
+  that upserts their real phases-mode config for their own official
+  template. Bamawl's is `seed_bamawl_import_export_config_v3` — the `_v3`
+  bump (from `_v2`) re-seeds even databases where an earlier version
+  already ran, so its move to `category_column: "Requirements"` (from the
+  old fixed `category` literal) and its `extra_columns` Status capture
+  take effect. Each is looked up by team **name**, not slug.
 
 ---
 
