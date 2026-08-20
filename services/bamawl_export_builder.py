@@ -766,16 +766,18 @@ class BamawlExportBuilder(BaseExportService):
 
     @staticmethod
     def template_path(app_root_path: str) -> str:
-        """Path to Bamawl Team's single official Excel template.
+        """Path to Bamawl Team's Excel template (import + export share
+        one format).
 
-        ``bamawl_import_export_format_filled.xlsx`` is the one
-        workbook used for both import
-        (``services/team_template_validator.py`` accepts an upload
-        structurally matching it) and export (this builds directly on
-        top of it) -- there is deliberately no separate import-only or
-        export-only template file (see this module's own docstring).
+        Uses the git-tracked ``import/bamawl/bamawl_import_template.xlsx``
+        -- the same structure Bamawl imports from, now including the
+        ``Requirements`` column (read as each task's Category on import
+        and written back into it on export). This replaces the old
+        ``simple_resource/`` customer workbook, which (a) isn't present
+        on a clean deploy and (b) predates the Requirements column, so
+        an export built on it had no column to write the category into.
         """
-        return os.path.join(app_root_path, "simple_resource", "bamawl_import_export_format_filled.xlsx")
+        return os.path.join(app_root_path, "import", "bamawl", "bamawl_import_template.xlsx")
 
     def build(self, context: ExportContext) -> None:
         build_bamawl_workbook(

@@ -92,6 +92,7 @@
         border-radius: 14px !important; overflow: hidden;
         border: 1px solid #e2e8f0 !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 28px rgba(0,0,0,0.05) !important;
+        margin-bottom: 1rem !important;
     }
     .preview-section-card > .card-header {
         background: #ffffff !important;
@@ -414,6 +415,23 @@
     </div>
 </div>
 
+<div class="row" id="coefPanelRow" style="display:none;">
+    <div class="col">
+        <div class="card preview-section-card">
+            <div class="card-header d-flex justify-content-between align-items-center" id="coefPanelHeader" style="cursor:pointer;">
+                <h5 class="mb-0">Percentage (%)</h5>
+                <span class="d-flex align-items-center gap-2">
+                    <small class="text-muted" style="font-size:0.72rem;">Edit a % to recalculate every task's man-hours</small>
+                    <i class="bi bi-chevron-down" id="coefPanelChevron" style="transition:transform 150ms ease;"></i>
+                </span>
+            </div>
+            <div class="card-body" id="coefPanelBody" style="display:none;">
+                <div id="coefPanelGrid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:8px 16px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row">
     <div class="col">
         <div class="card preview-section-card">
@@ -513,14 +531,18 @@
     // Development is (e.g. Bamawl's DFD / DFD Review / Test Data
     // Creation) — structural dead columns that only add noise in the UI.
     // Collect their (normalized) names so they can be hidden from the
-    // preview while still being written to the export as 0.
+    // preview while still being written to the export as 0. Rebuildable
+    // because the coefficients are user-editable (see the % panel): a
+    // phase changed from 0 to non-zero (or back) must re-hide/un-hide.
     var _ZERO_PHASES = {};
-    (function() {
+    function rebuildZeroPhases() {
+        _ZERO_PHASES = {};
         if (!PHASE_FORMULA || !PHASE_FORMULA.derived) return;
         PHASE_FORMULA.derived.forEach(function(d) {
             if (!d.coef) _ZERO_PHASES[_norm(d.label)] = true;
         });
-    })();
+    }
+    rebuildZeroPhases();
     function phaseIsAlwaysZero(label) { return _ZERO_PHASES[_norm(label)] === true; }
     function phaseIsEditable(label) {
         // With a phase formula, only the base phase is editable; without
@@ -529,6 +551,111 @@
         return _norm(label) === _norm(PHASE_FORMULA.base);
     }
     function _norm(s) { return String(s || '').replace(/\s+/g, '').toLowerCase(); }
+
+    // The editable coefficients default to the FIRST task's own implied
+    // ratios (each derived phase value ÷ the sum of its input phases'
+    // values), so a project assembled from several source workbooks
+    // adopts one consistent set of percentages — the first task's —
+    // rather than whatever mix came in. Falls back to the template's
+    // coefficient for any phase whose inputs are all zero in the first
+    // task (ratio undefined). Mutates PHASE_FORMULA.derived[].coef in
+    // place; call BEFORE the initial recalc so every task is computed
+    // from the unified percentages.
+    function computeCoefsFromFirstTask() {
+        if (!hasPhaseFormula()) return;
+        var first = null;
+        for (var ci = 0; ci < categories.length && !first; ci++) {
+            var tasks = categories[ci].tasks || [];
+            if (tasks.length) first = tasks[0];
+        }
+        if (!first) return;
+        var m = {};
+        (first.activities || []).forEach(function(a) {
+            m[_norm(a.task_detail)] = parseFloat(a.estimate_hours) || 0;
+        });
+        PHASE_FORMULA.derived.forEach(function(d) {
+            var denom = 0;
+            d.of.forEach(function(o) { denom += (m[_norm(o)] || 0); });
+            var num = m[_norm(d.label)];
+            if (denom > 0 && num !== undefined) {
+                d.coef = Math.round((num / denom) * 10000) / 10000;
+            }
+        });
+        rebuildZeroPhases();
+    }
+
+    // Recompute every task's derived phases from its base, across all
+    // categories — used after any coefficient edit and once on load.
+    function recalcAllTasks() {
+        if (!hasPhaseFormula()) return;
+        categories.forEach(function(cat) {
+            (cat.tasks || []).forEach(function(t) { applyPhaseFormula(t); });
+        });
+    }
+
+    // Render the editable percentage panel: one % input per derived
+    // phase, showing coef×100. Editing recomputes that phase's
+    // coefficient, recalculates every task from the new percentages,
+    // re-renders, and persists. Shown only for phase-formula teams.
+    function renderCoefPanel() {
+        if (!hasPhaseFormula()) return;
+        var row = document.getElementById('coefPanelRow');
+        var grid = document.getElementById('coefPanelGrid');
+        if (!row || !grid) return;
+        row.style.display = '';
+
+        // Collapsible: header toggles the body (starts collapsed to keep
+        // the screen tidy — it's only needed when adjusting percentages).
+        var header = document.getElementById('coefPanelHeader');
+        var body = document.getElementById('coefPanelBody');
+        var chevron = document.getElementById('coefPanelChevron');
+        if (header && !header._wired) {
+            header._wired = true;
+            header.addEventListener('click', function() {
+                var open = body.style.display !== 'none';
+                body.style.display = open ? 'none' : '';
+                if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
+            });
+        }
+
+        grid.innerHTML = '';
+        PHASE_FORMULA.derived.forEach(function(d, idx) {
+            var wrap = document.createElement('label');
+            wrap.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:0.8rem; color:#334155;';
+            var name = document.createElement('span');
+            name.textContent = d.label;
+            name.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+            var input = document.createElement('input');
+            input.type = 'number';
+            input.step = 'any';
+            input.min = '0';
+            input.value = Math.round((d.coef || 0) * 10000) / 100;  // coef -> %
+            input.setAttribute('data-coef-idx', idx);
+            input.style.cssText = 'width:76px; text-align:right; border:1px solid #e2e8f0; border-radius:6px; padding:3px 6px; font-size:0.8rem;';
+            input.addEventListener('change', onCoefChange);
+            var pct = document.createElement('span');
+            pct.textContent = '%';
+            pct.style.color = '#94a3b8';
+            var right = document.createElement('span');
+            right.style.cssText = 'display:flex; align-items:center; gap:3px; flex-shrink:0;';
+            right.appendChild(input);
+            right.appendChild(pct);
+            wrap.appendChild(name);
+            wrap.appendChild(right);
+            grid.appendChild(wrap);
+        });
+    }
+
+    function onCoefChange(e) {
+        var idx = parseInt(e.target.getAttribute('data-coef-idx'), 10);
+        var pct = parseFloat(e.target.value);
+        if (isNaN(pct) || pct < 0) { pct = 0; e.target.value = 0; }
+        PHASE_FORMULA.derived[idx].coef = Math.round((pct / 100) * 10000) / 10000;
+        rebuildZeroPhases();      // a 0%↔non-0% change re-hides/un-hides the phase
+        recalcAllTasks();         // every task's man-hours follow the new %
+        renderBody();
+        saveData();
+    }
 
     function applyPhaseFormula(task) {
         // Recompute every derived phase of one task from its base phase,
@@ -718,9 +845,12 @@
     // Initial render
     normalizeFixedPhases(categories);
     if (hasPhaseFormula()) {
-        categories.forEach(function(cat) {
-            (cat.tasks || []).forEach(function(t) { applyPhaseFormula(t); });
-        });
+        // Adopt the first task's implied percentages as the project-wide
+        // default, then recompute every task from them so they're all
+        // consistent (the user can then edit any percentage below).
+        computeCoefsFromFirstTask();
+        recalcAllTasks();
+        renderCoefPanel();
     }
     if (categories.length === 0) {
         showEmpty();
@@ -928,6 +1058,15 @@
         var container = document.getElementById('previewBody');
         var html = '';
 
+        // Preserve the user's collapsed/expanded task state across this
+        // full re-render: without this, rebuilding the HTML re-expands
+        // every task (each is emitted "collapse show"), so clicking Add
+        // Task / Add Category would pop open tasks the user had hidden.
+        var collapsedIds = {};
+        (container ? container.querySelectorAll('.collapse') : []).forEach(function(el) {
+            if (el.id && !el.classList.contains('show')) collapsedIds[el.id] = true;
+        });
+
         categories.forEach(function(cat, ci) {
             var catTotal = 0;
             cat.tasks.forEach(function(t) { catTotal += t.total_hours; });
@@ -1008,7 +1147,7 @@
                         '<div class="task-stats">' +
                             statsHtml +
                         '</div>' +
-                        '<button class="collapse-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" aria-expanded="true">' +
+                        '<button class="collapse-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" aria-expanded="' + (collapsedIds[collapseId] ? 'false' : 'true') + '">' +
                             '<i class="bi bi-chevron-up"></i>' +
                         '</button>' +
                     '</div>';
@@ -1023,7 +1162,7 @@
                 }
 
                 // Activities (collapsible)
-                html += '<div class="collapse show" id="' + collapseId + '">';
+                html += '<div class="collapse' + (collapsedIds[collapseId] ? '' : ' show') + '" id="' + collapseId + '">';
                 html += '<div class="activities-list">';
 
                 // Activity rows
